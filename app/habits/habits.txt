@@ -1,0 +1,1809 @@
+routes.py
+
+from datetime import date, timedelta, datetime
+from flask import Blueprint, render_template, request, redirect, url_for, jsonify
+from app.extensions import db
+from app.models import Habit, HabitCheck
+
+habits_bp = Blueprint("habits", __name__, url_prefix="/habits")
+
+
+def get_week_dates():
+    today = date.today()
+    start_of_week = today - timedelta(days=today.weekday())
+    return [start_of_week + timedelta(days=i) for i in range(7)]
+
+
+def get_day_letter(weekday_index):
+    letters = ["L", "M", "X", "J", "V", "S", "D"]
+    return letters[weekday_index]
+
+
+@habits_bp.route("/", methods=["GET", "POST"])
+def habits_page():
+    if request.method == "POST":
+        name = request.form.get("name", "").strip()
+        color = request.form.get("color", "#22c55e").strip()
+        weekly_goal = request.form.get("weekly_goal", 3)
+
+        if name:
+            try:
+                weekly_goal = int(weekly_goal)
+            except ValueError:
+                weekly_goal = 3
+
+            weekly_goal = max(1, min(7, weekly_goal))
+
+            new_habit = Habit(
+                name=name,
+                color=color,
+                weekly_goal=weekly_goal
+            )
+            db.session.add(new_habit)
+            db.session.commit()
+
+        return redirect(url_for("habits.habits_page"))
+
+    week_dates = get_week_dates()
+    habits = Habit.query.order_by(Habit.created_at.desc()).all()
+
+    habits_data = []
+
+    for habit in habits:
+        checks_map = {
+            check.date: check
+            for check in habit.checks
+            if check.date in week_dates
+        }
+
+        week_days = []
+        completed_count = 0
+
+        for day_date in week_dates:
+            completed = day_date in checks_map and checks_map[day_date].completed
+
+            if completed:
+                completed_count += 1
+
+            week_days.append({
+                "date": day_date,
+                "letter": get_day_letter(day_date.weekday()),
+                "completed": completed,
+                "is_today": day_date == date.today()
+            })
+
+        progress_percent = 0
+        if habit.weekly_goal > 0:
+            progress_percent = min((completed_count / habit.weekly_goal) * 100, 100)
+
+        habits_data.append({
+            "habit": habit,
+            "week_days": week_days,
+            "completed_count": completed_count,
+            "progress_percent": progress_percent
+        })
+
+    chart_labels = [item["habit"].name for item in habits_data]
+    chart_completed = [item["completed_count"] for item in habits_data]
+    chart_goals = [item["habit"].weekly_goal for item in habits_data]
+    chart_colors = [item["habit"].color for item in habits_data]
+
+    return render_template(
+        "habits/habits.html",
+        habits_data=habits_data,
+        chart_labels=chart_labels,
+        chart_completed=chart_completed,
+        chart_goals=chart_goals,
+        chart_colors=chart_colors
+    )
+
+@habits_bp.route("/toggle/<int:habit_id>/<day_str>", methods=["POST"])
+def toggle_habit_day(habit_id, day_str):
+    habit = Habit.query.get_or_404(habit_id)
+
+    try:
+        target_date = datetime.strptime(day_str, "%Y-%m-%d").date()
+    except ValueError:
+        if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+            return jsonify({"ok": False}), 400
+        return redirect(url_for("habits.habits_page"))
+
+    check = HabitCheck.query.filter_by(habit_id=habit.id, date=target_date).first()
+
+    if check:
+        db.session.delete(check)
+        completed = False
+    else:
+        check = HabitCheck(
+            habit_id=habit.id,
+            date=target_date,
+            completed=True
+        )
+        db.session.add(check)
+        completed = True
+
+    db.session.commit()
+
+    week_dates = get_week_dates()
+    completed_count = sum(
+        1 for d in week_dates
+        if HabitCheck.query.filter_by(habit_id=habit.id, date=d).first()
+    )
+
+    progress_percent = 0
+    if habit.weekly_goal > 0:
+        progress_percent = min((completed_count / habit.weekly_goal) * 100, 100)
+
+    if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+        return jsonify({
+            "ok": True,
+            "completed": completed,
+            "completed_count": completed_count,
+            "weekly_goal": habit.weekly_goal,
+            "progress_percent": progress_percent,
+            "color": habit.color
+        })
+
+    return redirect(url_for("habits.habits_page"))
+
+
+@habits_bp.route("/edit/<int:habit_id>", methods=["POST"])
+def edit_habit(habit_id):
+    habit = Habit.query.get_or_404(habit_id)
+
+    name = request.form.get("name", "").strip()
+    color = request.form.get("color", "#22c55e").strip()
+    weekly_goal = request.form.get("weekly_goal", 3)
+
+    if name:
+        try:
+            weekly_goal = int(weekly_goal)
+        except ValueError:
+            weekly_goal = 3
+
+        weekly_goal = max(1, min(7, weekly_goal))
+
+        habit.name = name
+        habit.color = color
+        habit.weekly_goal = weekly_goal
+
+        db.session.commit()
+
+    return redirect(url_for("habits.habits_page"))
+
+@habits_bp.route("/delete/<int:habit_id>", methods=["POST"])
+def delete_habit(habit_id):
+    habit = Habit.query.get_or_404(habit_id)
+    db.session.delete(habit)
+    db.session.commit()
+    return redirect(url_for("habits.habits_page"))
+
+
+
+main.js
+
+const THEME_KEY = "habit-theme";
+
+function applyTheme(theme) {
+    const root = document.documentElement;
+
+    if (theme === "dark") {
+        root.classList.add("dark-mode");
+    } else {
+        root.classList.remove("dark-mode");
+    }
+
+    localStorage.setItem(THEME_KEY, theme);
+
+    if (typeof window.renderHabitsChart === "function") {
+        window.renderHabitsChart();
+    }
+}
+
+function initTheme() {
+    const savedTheme = localStorage.getItem(THEME_KEY);
+    if (savedTheme === "dark" || savedTheme === "light") {
+        applyTheme(savedTheme);
+    } else {
+        applyTheme("light");
+    }
+
+    const toggleBtn = document.getElementById("themeToggle");
+    if (toggleBtn) {
+        toggleBtn.addEventListener("click", () => {
+            const isDark = document.documentElement.classList.contains("dark-mode");
+            applyTheme(isDark ? "light" : "dark");
+        });
+    }
+}
+
+document.addEventListener("DOMContentLoaded", initTheme);
+
+
+
+habits.html
+
+{% extends "base.html" %}
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/habits.css') }}">
+{% endblock %}
+{% block title %}Hábitos - Rastreador{% endblock %}
+
+{% block content %}
+<section class="habits-page">
+    <div class="page-header habits-header">
+        <div>
+            <h2>Mis Hábitos</h2>
+            <p>Creá hábitos, marcá los días cumplidos y seguí tu progreso semanal.</p>
+        </div>
+
+        <button type="button" class="icon-add-btn" id="openCreateModal" title="Nuevo hábito">+</button>
+    </div>
+
+    <div class="habits-content">
+        <section class="habit-list-card">
+            <div class="section-header">
+                <h3>Lista de hábitos</h3>
+            </div>
+
+            {% if habits_data %}
+                <div class="habit-cards">
+                    {% for item in habits_data %}
+                        {% set habit_index = loop.index0 %}
+                        <article class="habit-card">
+                            <div class="habit-card-top">
+                                <div>
+                                    <h4>{{ item.habit.name }}</h4>
+                                    <p id="habit-count-{{ item.habit.id }}">
+                                        {{ item.completed_count }}/{{ item.habit.weekly_goal }}
+                                        veces esta semana
+                                    </p>
+                                </div>
+
+                                <div class="habit-actions-top">
+                                    <span id="habit-badge-{{ item.habit.id }}" class="habit-badge" style="color: {{ item.habit.color }};">
+                                        {{ item.completed_count }}
+                                    </span>
+
+                                    <button
+                                        type="button"
+                                        class="edit-habit-btn"
+                                        data-id="{{ item.habit.id }}"
+                                        data-name="{{ item.habit.name }}"
+                                        data-color="{{ item.habit.color }}"
+                                        data-goal="{{ item.habit.weekly_goal }}"
+                                        title="Editar hábito"
+                                    >
+                                        ✎
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div class="habit-progress">
+                                <div class="habit-progress-track">
+                                    <div
+                                        id="habit-progress-{{ item.habit.id }}"
+                                        class="habit-progress-fill"
+                                        style="width: {{ item.progress_percent }}%; background-color: {{ item.habit.color }};"
+                                    ></div>
+                                </div>
+                            </div>
+
+                            <div class="habit-days">
+                                {% for day in item.week_days %}
+                                    <button
+                                        type="button"
+                                        class="day-btn js-day-btn {% if day.completed %}completed{% endif %} {% if day.is_today %}today{% endif %}"
+                                        data-url="{{ url_for('habits.toggle_habit_day', habit_id=item.habit.id, day_str=day.date.isoformat()) }}"
+                                        data-color="{{ item.habit.color }}"
+                                        data-habit-id="{{ item.habit.id }}"
+                                        data-chart-index="{{ habit_index }}"
+                                        {% if day.completed %}
+                                            style="background-color: {{ item.habit.color }}; border-color: {{ item.habit.color }}; color: white;"
+                                        {% endif %}
+                                    >
+                                        {{ day.letter }}
+                                    </button>
+                                {% endfor %}
+                            </div>
+                        </article>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <div class="empty-state-wrap">
+                    <p class="empty-state">Todavía no hay hábitos creados.</p>
+                    <button type="button" class="primary-btn" id="emptyCreateBtn">Crear primer hábito</button>
+                </div>
+            {% endif %}
+        </section>
+
+        <section class="habit-chart-card">
+            <h3>Progreso de Hábitos</h3>
+            <div class="chart-container">
+                <canvas id="habitsChart"></canvas>
+            </div>
+        </section>
+    </div>
+</section>
+
+<div class="modal-overlay hidden" id="habitModalOverlay">
+    <div class="habit-modal hidden" id="createHabitModal">
+        <div class="modal-header">
+            <h3>Nuevo hábito</h3>
+            <button type="button" class="modal-close-btn" data-close-modal>&times;</button>
+        </div>
+
+        <form method="POST" action="{{ url_for('habits.habits_page') }}" class="habit-form">
+            <div class="form-group">
+                <label for="create-name">Nombre</label>
+                <input type="text" id="create-name" name="name" placeholder="Ej: Ejercicio" required>
+            </div>
+
+            <div class="form-group">
+                <label for="create-color">Color</label>
+                <input type="color" id="create-color" name="color" value="#22c55e">
+            </div>
+
+            <div class="form-group">
+                <label for="create-weekly-goal">Meta semanal</label>
+                <input type="number" id="create-weekly-goal" name="weekly_goal" min="1" max="7" value="3" required>
+            </div>
+
+            <div class="modal-actions">
+                <button type="button" class="secondary-btn" data-close-modal>Cancelar</button>
+                <button type="submit" class="primary-btn">Crear hábito</button>
+            </div>
+        </form>
+    </div>
+
+    <div class="habit-modal hidden" id="editHabitModal">
+        <div class="modal-header">
+            <h3>Editar hábito</h3>
+            <button type="button" class="modal-close-btn" data-close-modal>&times;</button>
+        </div>
+
+        <form method="POST" id="editHabitForm" class="habit-form">
+            <div class="form-group">
+                <label for="edit-name">Nombre</label>
+                <input type="text" id="edit-name" name="name" required>
+            </div>
+
+            <div class="form-group">
+                <label for="edit-color">Color</label>
+                <input type="color" id="edit-color" name="color" value="#22c55e">
+            </div>
+
+            <div class="form-group">
+                <label for="edit-weekly-goal">Meta semanal</label>
+                <input type="number" id="edit-weekly-goal" name="weekly_goal" min="1" max="7" required>
+            </div>
+
+            <div class="modal-actions">
+                <button type="button" class="secondary-btn" data-close-modal>Cancelar</button>
+                <button type="submit" class="primary-btn">Guardar cambios</button>
+            </div>
+        </form>
+
+        <form method="POST" id="deleteHabitForm" class="delete-habit-form" onsubmit="return confirm('¿Seguro que querés eliminar este hábito?');">
+            <button type="submit" class="danger-btn">Eliminar hábito</button>
+        </form>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+    const habitLabels = {{ chart_labels | tojson }};
+    const habitCompleted = {{ chart_completed | tojson }};
+    const habitGoals = {{ chart_goals | tojson }};
+    const habitColors = {{ chart_colors | tojson }};
+
+    let habitsChartInstance = null;
+
+    function getChartThemeColors() {
+        const styles = getComputedStyle(document.body);
+        return {
+            text: styles.getPropertyValue('--chart-text').trim(),
+            grid: styles.getPropertyValue('--chart-grid').trim(),
+            goalBg: styles.getPropertyValue('--chart-goal-bg').trim(),
+            goalBorder: styles.getPropertyValue('--chart-goal-border').trim()
+        };
+    }
+
+    function renderHabitsChart() {
+        const ctx = document.getElementById("habitsChart");
+        if (!ctx || habitLabels.length === 0) return;
+
+        const theme = getChartThemeColors();
+
+        if (habitsChartInstance) {
+            habitsChartInstance.destroy();
+        }
+
+        habitsChartInstance = new Chart(ctx, {
+            type: "bar",
+            data: {
+                labels: habitLabels,
+                datasets: [
+                    {
+                        label: "Completado",
+                        data: habitCompleted,
+                        backgroundColor: habitColors,
+                        borderColor: habitColors,
+                        borderWidth: 1
+                    },
+                    {
+                        label: "Meta",
+                        data: habitGoals,
+                        backgroundColor: theme.goalBg,
+                        borderColor: theme.goalBorder,
+                        borderWidth: 1
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    x: {
+                        ticks: {
+                            color: theme.text
+                        },
+                        grid: {
+                            color: theme.grid
+                        }
+                    },
+                    y: {
+                        beginAtZero: true,
+                        suggestedMax: 7,
+                        ticks: {
+                            stepSize: 1,
+                            color: theme.text
+                        },
+                        grid: {
+                            color: theme.grid
+                        }
+                    }
+                },
+                plugins: {
+                    legend: {
+                        position: "top",
+                        labels: {
+                            color: theme.text
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    renderHabitsChart();
+    window.renderHabitsChart = renderHabitsChart;
+
+    const modalOverlay = document.getElementById("habitModalOverlay");
+    const createModal = document.getElementById("createHabitModal");
+    const editModal = document.getElementById("editHabitModal");
+    const openCreateModalBtn = document.getElementById("openCreateModal");
+    const emptyCreateBtn = document.getElementById("emptyCreateBtn");
+    const editForm = document.getElementById("editHabitForm");
+
+    function closeAllModals() {
+        modalOverlay.classList.add("hidden");
+        createModal.classList.add("hidden");
+        editModal.classList.add("hidden");
+    }
+
+    function openCreateModal() {
+        modalOverlay.classList.remove("hidden");
+        createModal.classList.remove("hidden");
+        editModal.classList.add("hidden");
+    }
+
+    function openEditModal(id, name, color, goal) {
+    editForm.action = `/habits/edit/${id}`;
+
+    const deleteForm = document.getElementById("deleteHabitForm");
+    if (deleteForm) {
+        deleteForm.action = `/habits/delete/${id}`;
+    }
+
+    document.getElementById("edit-name").value = name;
+    document.getElementById("edit-color").value = color;
+    document.getElementById("edit-weekly-goal").value = goal;
+
+    modalOverlay.classList.remove("hidden");
+    editModal.classList.remove("hidden");
+    createModal.classList.add("hidden");
+}
+    if (openCreateModalBtn) {
+        openCreateModalBtn.addEventListener("click", openCreateModal);
+    }
+
+    if (emptyCreateBtn) {
+        emptyCreateBtn.addEventListener("click", openCreateModal);
+    }
+
+    document.querySelectorAll("[data-close-modal]").forEach(btn => {
+        btn.addEventListener("click", closeAllModals);
+    });
+
+    modalOverlay.addEventListener("click", (e) => {
+        if (e.target === modalOverlay) {
+            closeAllModals();
+        }
+    });
+
+    document.querySelectorAll(".edit-habit-btn").forEach(btn => {
+        btn.addEventListener("click", () => {
+            openEditModal(
+                btn.dataset.id,
+                btn.dataset.name,
+                btn.dataset.color,
+                btn.dataset.goal
+            );
+        });
+    });
+
+    document.querySelectorAll(".js-day-btn").forEach(btn => {
+        btn.addEventListener("click", async () => {
+            const url = btn.dataset.url;
+            const color = btn.dataset.color;
+            const habitId = btn.dataset.habitId;
+            const chartIndex = Number(btn.dataset.chartIndex);
+            
+            try {
+                const response = await fetch(url, {
+                    method: "POST",
+                    headers: {
+                        "X-Requested-With": "XMLHttpRequest"
+                    }
+                });
+
+                if (!response.ok) return;
+
+                const data = await response.json();
+                if (!data.ok) return;
+
+                if (data.completed) {
+                    btn.classList.add("completed");
+                    btn.style.backgroundColor = color;
+                    btn.style.borderColor = color;
+                    btn.style.color = "white";
+                } else {
+                    btn.classList.remove("completed");
+                    btn.style.backgroundColor = "";
+                    btn.style.borderColor = "";
+                    btn.style.color = "";
+                }
+
+                const countEl = document.getElementById(`habit-count-${habitId}`);
+                if (countEl) {
+                    countEl.textContent = `${data.completed_count}/${data.weekly_goal} veces esta semana`;
+                }
+
+                const badgeEl = document.getElementById(`habit-badge-${habitId}`);
+                if (badgeEl) {
+                    badgeEl.textContent = data.completed_count;
+                }
+
+                const progressEl = document.getElementById(`habit-progress-${habitId}`);
+                if (progressEl) {
+                    progressEl.style.width = `${data.progress_percent}%`;
+                }
+
+                if (!Number.isNaN(chartIndex)) {
+                    habitCompleted[chartIndex] = data.completed_count;
+                    if (typeof renderHabitsChart === "function") {
+                        renderHabitsChart();
+                    }
+                }
+
+            } catch (error) {
+                console.error("Error al marcar hábito:", error);
+            }
+        });
+    });
+</script>
+{% endblock %}
+
+
+base.html
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Rastreador de Hábitos{% endblock %}</title>
+
+    <script>
+        (function () {
+            const savedTheme = localStorage.getItem("habit-theme");
+            const isDark = savedTheme === "dark";
+
+            if (isDark) {
+                document.documentElement.classList.add("dark-mode");
+            }
+
+            document.documentElement.setAttribute(
+                "data-theme-icon",
+                isDark ? "☀️" : "🌙"
+            );
+        })();
+    </script>
+
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/themes.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/base.css') }}">
+{% block extra_css %}{% endblock %}</head>
+<body>
+    <header class="main-header">
+        <div class="container header-row">
+            <h1><a href="{{ url_for('dashboard.index') }}">Organizate</a></h1>
+
+            <div class="header-actions">
+                <nav class="main-nav">
+                    <a href="{{ url_for('dashboard.index') }}">Hola</a>
+                    <a href="{{ url_for('habits.habits_page') }}">Hábitos</a>
+                    <a href="{{ url_for('projects.projects_page') }}">Proyectos</a>
+                </nav>
+
+                <button id="themeToggle" class="theme-toggle-btn" type="button" aria-label="Cambiar tema">
+                    <span id="themeToggleIcon"></span>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <main class="container">
+        {% block content %}{% endblock %}
+    </main>
+
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>
+
+index.html
+
+{% extends "base.html" %}
+
+{% block title %}Inicio{% endblock %}
+
+{% block content %}
+<section class="home-dashboard fade-in-page">
+    <section class="home-hero-card">
+        <div class="home-hero-top">
+            <div>
+                <h2 id="dashboardTitle">{{ dashboard_config.title }}</h2>
+                <p id="dashboardDescription">{{ dashboard_config.description }}</p>
+            </div>
+
+            <button type="button" class="primary-btn" id="openHeaderEditModal">Editar</button>
+        </div>
+    </section>
+
+    <div class="home-main-grid">
+        <section class="home-tasks-card">
+            <div class="section-header home-section-header">
+                <h3>Tareas rápidas</h3>
+                <button type="button" class="icon-add-btn small-add-btn" id="openTaskCreateModal">+</button>
+            </div>
+
+            <p class="empty-state" id="homeTasksEmptyState" {% if home_tasks %}style="display: none;"{% endif %}>
+                Todavía no hay tareas rápidas.
+            </p>
+
+            <div class="home-task-list" id="homeTaskList">
+                {% for task in home_tasks %}
+                    <div class="home-task-item {% if task.completed %}completed{% endif %}" id="home-task-{{ task.id }}">
+                        <form method="POST" action="{{ url_for('dashboard.toggle_home_task', task_id=task.id) }}" class="js-home-task-toggle">
+                            <button type="submit" class="home-task-check">
+                                {% if task.completed %}✓{% endif %}
+                            </button>
+                        </form>
+
+                        <span class="home-task-title">{{ task.title }}</span>
+
+                        <form method="POST" action="{{ url_for('dashboard.delete_home_task', task_id=task.id) }}" class="js-home-task-delete">
+                            <button type="submit" class="home-task-delete">×</button>
+                        </form>
+                    </div>
+                {% endfor %}
+            </div>
+        </section>
+
+        <section class="home-note-card">
+            <div class="section-header home-section-header">
+                <h3 id="homeNoteTitle">{{ home_note.title }}</h3>
+                <button type="button" class="primary-btn" id="openNoteEditModal">Editar nota</button>
+            </div>
+
+            <div class="home-note-content" id="homeNoteContent">
+                {% if home_note.content %}
+                    {{ home_note.content }}
+                {% else %}
+                    <span class="empty-state">Todavía no escribiste una nota principal.</span>
+                {% endif %}
+            </div>
+        </section>
+    </div>
+</section>
+
+<!-- Modal editar header -->
+<div class="modal-overlay hidden" id="headerEditModalOverlay">
+    <div class="habit-modal hidden" id="headerEditModal">
+        <div class="modal-header">
+            <h3>Editar encabezado</h3>
+            <button type="button" class="modal-close-btn" data-close-header-modal>&times;</button>
+        </div>
+
+        <form method="POST" action="{{ url_for('dashboard.edit_dashboard_header') }}" class="habit-form">
+            <div class="form-group">
+                <label for="dashboard-title">Título</label>
+                <input type="text" id="dashboard-title" name="title" value="{{ dashboard_config.title }}" required>
+            </div>
+
+            <div class="form-group">
+                <label for="dashboard-description">Descripción</label>
+                <textarea id="dashboard-description" name="description" rows="4">{{ dashboard_config.description }}</textarea>
+            </div>
+
+            <div class="modal-actions">
+                <button type="button" class="secondary-btn" data-close-header-modal>Cancelar</button>
+                <button type="submit" class="primary-btn">Guardar</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Modal crear tarea -->
+<div class="modal-overlay hidden" id="taskCreateModalOverlay">
+    <div class="habit-modal hidden" id="taskCreateModal">
+        <div class="modal-header">
+            <h3>Nueva tarea rápida</h3>
+            <button type="button" class="modal-close-btn" data-close-task-modal>&times;</button>
+        </div>
+
+        <form method="POST" action="{{ url_for('dashboard.create_home_task') }}" class="habit-form">
+            <div class="form-group">
+                <label for="home-task-title">Título</label>
+                <input type="text" id="home-task-title" name="title" placeholder="Ej: Revisar proyecto X" required>
+            </div>
+
+            <div class="modal-actions">
+                <button type="button" class="secondary-btn" data-close-task-modal>Cancelar</button>
+                <button type="submit" class="primary-btn">Agregar tarea</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Modal editar nota -->
+<div class="modal-overlay hidden" id="noteEditModalOverlay">
+    <div class="habit-modal hidden" id="noteEditModal">
+        <div class="modal-header">
+            <h3>Editar nota principal</h3>
+            <button type="button" class="modal-close-btn" data-close-note-modal>&times;</button>
+        </div>
+
+        <form method="POST" action="{{ url_for('dashboard.edit_home_note') }}" class="habit-form">
+            <div class="form-group">
+                <label for="home-note-title">Título</label>
+                <input type="text" id="home-note-title" name="title" value="{{ home_note.title }}">
+            </div>
+
+            <div class="form-group">
+                <label for="home-note-content">Contenido</label>
+                <textarea id="home-note-content" name="content" rows="10">{{ home_note.content }}</textarea>
+            </div>
+
+            <div class="modal-actions">
+                <button type="button" class="secondary-btn" data-close-note-modal>Cancelar</button>
+                <button type="submit" class="primary-btn">Guardar nota</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+    const headerOverlay = document.getElementById("headerEditModalOverlay");
+    const headerModal = document.getElementById("headerEditModal");
+    const openHeaderBtn = document.getElementById("openHeaderEditModal");
+
+    const taskOverlay = document.getElementById("taskCreateModalOverlay");
+    const taskModal = document.getElementById("taskCreateModal");
+    const openTaskBtn = document.getElementById("openTaskCreateModal");
+
+    const noteOverlay = document.getElementById("noteEditModalOverlay");
+    const noteModal = document.getElementById("noteEditModal");
+    const openNoteBtn = document.getElementById("openNoteEditModal");
+
+    function closeHeaderModal() {
+        headerOverlay.classList.add("hidden");
+        headerModal.classList.add("hidden");
+    }
+
+    function openHeaderModal() {
+        headerOverlay.classList.remove("hidden");
+        headerModal.classList.remove("hidden");
+    }
+
+    function closeTaskModal() {
+        taskOverlay.classList.add("hidden");
+        taskModal.classList.add("hidden");
+    }
+
+    function openTaskModal() {
+        taskOverlay.classList.remove("hidden");
+        taskModal.classList.remove("hidden");
+    }
+
+    function closeNoteModal() {
+        noteOverlay.classList.add("hidden");
+        noteModal.classList.add("hidden");
+    }
+
+    function openNoteModal() {
+        noteOverlay.classList.remove("hidden");
+        noteModal.classList.remove("hidden");
+    }
+
+    if (openHeaderBtn) openHeaderBtn.addEventListener("click", openHeaderModal);
+    if (openTaskBtn) openTaskBtn.addEventListener("click", openTaskModal);
+    if (openNoteBtn) openNoteBtn.addEventListener("click", openNoteModal);
+
+    document.querySelectorAll("[data-close-header-modal]").forEach(btn => {
+        btn.addEventListener("click", closeHeaderModal);
+    });
+
+    document.querySelectorAll("[data-close-task-modal]").forEach(btn => {
+        btn.addEventListener("click", closeTaskModal);
+    });
+
+    document.querySelectorAll("[data-close-note-modal]").forEach(btn => {
+        btn.addEventListener("click", closeNoteModal);
+    });
+
+    headerOverlay.addEventListener("click", (e) => {
+        if (e.target === headerOverlay) closeHeaderModal();
+    });
+
+    taskOverlay.addEventListener("click", (e) => {
+        if (e.target === taskOverlay) closeTaskModal();
+    });
+
+    noteOverlay.addEventListener("click", (e) => {
+        if (e.target === noteOverlay) closeNoteModal();
+    });
+
+    function escapeHtml(text) {
+        const div = document.createElement("div");
+        div.textContent = text || "";
+        return div.innerHTML;
+    }
+
+    function updateEmptyStateVisibility() {
+        const taskList = document.getElementById("homeTaskList");
+        const emptyState = document.getElementById("homeTasksEmptyState");
+        if (!taskList || !emptyState) return;
+
+        const hasTasks = taskList.querySelectorAll(".home-task-item").length > 0;
+        emptyState.style.display = hasTasks ? "none" : "";
+    }
+
+    function bindHomeTaskActions(taskElement, task) {
+        const toggleForm = taskElement.querySelector(".js-home-task-toggle");
+        const deleteForm = taskElement.querySelector(".js-home-task-delete");
+
+        if (toggleForm) {
+            toggleForm.addEventListener("submit", async (e) => {
+                e.preventDefault();
+
+                const response = await fetch(toggleForm.action, {
+                    method: "POST",
+                    headers: { "X-Requested-With": "XMLHttpRequest" }
+                });
+
+                const data = await response.json();
+                if (!data.ok) return;
+
+                if (data.task.completed) {
+                    taskElement.classList.add("completed");
+                    taskElement.querySelector(".home-task-check").textContent = "✓";
+                } else {
+                    taskElement.classList.remove("completed");
+                    taskElement.querySelector(".home-task-check").textContent = "";
+                }
+            });
+        }
+
+        if (deleteForm) {
+            deleteForm.addEventListener("submit", async (e) => {
+                e.preventDefault();
+
+                const response = await fetch(deleteForm.action, {
+                    method: "POST",
+                    headers: { "X-Requested-With": "XMLHttpRequest" }
+                });
+
+                const data = await response.json();
+                if (!data.ok) return;
+
+                taskElement.remove();
+                updateEmptyStateVisibility();
+            });
+        }
+    }
+
+    function buildHomeTask(task) {
+        const wrapper = document.createElement("div");
+        wrapper.className = `home-task-item${task.completed ? " completed" : ""}`;
+        wrapper.id = `home-task-${task.id}`;
+
+        wrapper.innerHTML = `
+            <form method="POST" action="/dashboard/tasks/${task.id}/toggle" class="js-home-task-toggle">
+                <button type="submit" class="home-task-check">${task.completed ? "✓" : ""}</button>
+            </form>
+
+            <span class="home-task-title">${escapeHtml(task.title)}</span>
+
+            <form method="POST" action="/dashboard/tasks/${task.id}/delete" class="js-home-task-delete">
+                <button type="submit" class="home-task-delete">×</button>
+            </form>
+        `;
+
+        bindHomeTaskActions(wrapper, task);
+        return wrapper;
+    }
+
+    document.querySelectorAll(".home-task-item").forEach(taskEl => {
+        bindHomeTaskActions(taskEl, {});
+    });
+
+    const headerForm = headerModal ? headerModal.querySelector("form") : null;
+    const taskCreateForm = taskModal ? taskModal.querySelector("form") : null;
+    const noteForm = noteModal ? noteModal.querySelector("form") : null;
+
+    if (headerForm) {
+        headerForm.addEventListener("submit", async (e) => {
+            e.preventDefault();
+
+            const formData = new FormData(headerForm);
+            const response = await fetch(headerForm.action, {
+                method: "POST",
+                headers: { "X-Requested-With": "XMLHttpRequest" },
+                body: formData
+            });
+
+            const data = await response.json();
+            if (!data.ok) return;
+
+            document.getElementById("dashboardTitle").textContent = data.config.title;
+            document.getElementById("dashboardDescription").textContent = data.config.description;
+            closeHeaderModal();
+        });
+    }
+
+    if (taskCreateForm) {
+        taskCreateForm.addEventListener("submit", async (e) => {
+            e.preventDefault();
+
+            const formData = new FormData(taskCreateForm);
+            const response = await fetch(taskCreateForm.action, {
+                method: "POST",
+                headers: { "X-Requested-With": "XMLHttpRequest" },
+                body: formData
+            });
+
+            const data = await response.json();
+            if (!data.ok) return;
+
+            const taskList = document.getElementById("homeTaskList");
+            if (taskList) {
+                taskList.appendChild(buildHomeTask(data.task));
+            }
+
+            taskCreateForm.reset();
+            updateEmptyStateVisibility();
+            closeTaskModal();
+        });
+    }
+
+    if (noteForm) {
+        noteForm.addEventListener("submit", async (e) => {
+            e.preventDefault();
+
+            const formData = new FormData(noteForm);
+            const response = await fetch(noteForm.action, {
+                method: "POST",
+                headers: { "X-Requested-With": "XMLHttpRequest" },
+                body: formData
+            });
+
+            const data = await response.json();
+            if (!data.ok) return;
+
+            document.getElementById("homeNoteTitle").textContent = data.note.title;
+            document.getElementById("homeNoteContent").textContent = data.note.content;
+            closeNoteModal();
+        });
+    }
+
+    updateEmptyStateVisibility();
+</script>
+{% endblock %}
+
+models.py
+
+
+from datetime import datetime
+from app.extensions import db
+
+
+class Habit(db.Model):
+    __tablename__ = "habits"
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(120), nullable=False)
+    color = db.Column(db.String(20), nullable=False, default="#22c55e")
+    weekly_goal = db.Column(db.Integer, nullable=False, default=3)
+    is_active = db.Column(db.Boolean, default=True, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    checks = db.relationship(
+        "HabitCheck",
+        backref="habit",
+        lazy=True,
+        cascade="all, delete-orphan"
+    )
+
+    def __repr__(self):
+        return f"<Habit {self.name}>"
+
+
+class HabitCheck(db.Model):
+    __tablename__ = "habit_checks"
+
+    id = db.Column(db.Integer, primary_key=True)
+    habit_id = db.Column(db.Integer, db.ForeignKey("habits.id"), nullable=False)
+    date = db.Column(db.Date, nullable=False)
+    completed = db.Column(db.Boolean, nullable=False, default=True)
+
+    __table_args__ = (
+        db.UniqueConstraint("habit_id", "date", name="unique_habit_check_per_day"),
+    )
+
+    def __repr__(self):
+        return f"<HabitCheck habit_id={self.habit_id} date={self.date}>"
+
+
+class Project(db.Model):
+    __tablename__ = "projects"
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(160), nullable=False)
+    description = db.Column(db.Text, nullable=True)
+    status = db.Column(db.String(30), nullable=False, default="idea")
+    start_date = db.Column(db.Date, nullable=True)
+    end_date = db.Column(db.Date, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    events = db.relationship(
+        "ProjectEvent",
+        backref="project",
+        lazy=True,
+        cascade="all, delete-orphan",
+        order_by="ProjectEvent.event_date.asc(), ProjectEvent.created_at.asc()"
+    )
+
+    tasks = db.relationship(
+        "ProjectTask",
+        backref="project",
+        lazy=True,
+        cascade="all, delete-orphan",
+        order_by="ProjectTask.order_index.asc(), ProjectTask.created_at.asc()"
+    )
+
+    def __repr__(self):
+        return f"<Project {self.name}>"
+
+
+class ProjectEvent(db.Model):
+    __tablename__ = "project_events"
+
+    id = db.Column(db.Integer, primary_key=True)
+    project_id = db.Column(db.Integer, db.ForeignKey("projects.id"), nullable=False)
+    title = db.Column(db.String(160), nullable=False)
+    description = db.Column(db.Text, nullable=True)
+    event_date = db.Column(db.Date, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    def __repr__(self):
+        return f"<ProjectEvent {self.title}>"
+
+
+class ProjectTask(db.Model):
+    __tablename__ = "project_tasks"
+
+    id = db.Column(db.Integer, primary_key=True)
+    project_id = db.Column(db.Integer, db.ForeignKey("projects.id"), nullable=False)
+    title = db.Column(db.String(160), nullable=False)
+    description = db.Column(db.Text, nullable=True)
+    column_name = db.Column(db.String(30), nullable=False, default="pendiente")
+    order_index = db.Column(db.Integer, nullable=False, default=0)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    def __repr__(self):
+        return f"<ProjectTask {self.title}>"
+    
+
+class DashboardConfig(db.Model):
+    __tablename__ = "dashboard_config"
+
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String(200), nullable=False, default="Organizate")
+    description = db.Column(
+        db.Text,
+        nullable=False,
+        default="Tu centro personal para hábitos, proyectos y enfoque diario."
+    )
+
+    def __repr__(self):
+        return f"<DashboardConfig {self.title}>"
+
+
+
+class HomeTask(db.Model):
+    __tablename__ = "home_tasks"
+
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String(200), nullable=False)
+    completed = db.Column(db.Boolean, nullable=False, default=False)
+    order_index = db.Column(db.Integer, nullable=False, default=0)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    def __repr__(self):
+        return f"<HomeTask {self.title}>"
+
+
+
+class HomeNote(db.Model):
+    __tablename__ = "home_notes"
+
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String(200), nullable=True, default="Nota principal")
+    content = db.Column(
+        db.Text,
+        nullable=False,
+        default="Escribí acá tu nota principal."
+    )
+    updated_at = db.Column(
+        db.DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+        nullable=False
+    )
+
+    def __repr__(self):
+        return f"<HomeNote {self.title}>"
+
+
+
+
+habits.css
+
+.habits-page {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+    height: calc(100vh - 120px);
+    min-height: 0;
+}
+
+.habits-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+}
+
+.habits-content {
+    display: grid;
+    grid-template-columns: minmax(360px, 460px) minmax(0, 1fr);
+    gap: 1.5rem;
+    align-items: stretch;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+}
+
+.habit-list-card,
+.habit-chart-card {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+}
+
+.habit-list-card h3,
+.habit-chart-card h3 {
+    margin-bottom: 1rem;
+}
+
+.section-header {
+    margin-bottom: 1rem;
+}
+
+.chart-container {
+    position: relative;
+    width: 100%;
+    flex: 1;
+    min-height: 560px;
+}
+
+.habit-cards {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    overflow-y: auto;
+    min-height: 0;
+    padding-right: 0.35rem;
+}
+.habit-card {
+    background: var(--card-alt-bg);
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    padding: 1rem;
+    transition: background-color 0.2s ease, border-color 0.2s ease;
+}
+
+.habit-card-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 1rem;
+    margin-bottom: 0.9rem;
+}
+
+.habit-card-top h4 {
+    font-size: 1.2rem;
+    margin-bottom: 0.25rem;
+}
+
+.habit-actions-top {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.habit-badge {
+    font-weight: 700;
+    font-size: 1rem;
+}
+
+.habit-progress {
+    margin-bottom: 1rem;
+}
+
+.habit-progress-track {
+    width: 100%;
+    height: 9px;
+    background: var(--track-bg);
+    border-radius: 999px;
+    overflow: hidden;
+}
+
+.habit-progress-fill {
+    height: 100%;
+    border-radius: 999px;
+}
+
+.habit-days {
+    display: flex;
+    gap: 0.6rem;
+    flex-wrap: wrap;
+}
+
+.day-form {
+    margin: 0;
+}
+
+.day-btn {
+    width: 42px;
+    height: 42px;
+    border-radius: 999px;
+    border: 1px solid transparent;
+    background: var(--day-bg);
+    color: var(--text);
+    font-weight: 600;
+    font-size: 0.95rem;
+    cursor: pointer;
+    transition: transform 0.15s ease, border-color 0.15s ease, background-color 0.2s ease, color 0.2s ease;
+}
+
+.day-btn:hover {
+    transform: translateY(-1px);
+}
+
+.day-btn.today {
+    border-color: var(--border-strong);
+}
+
+.empty-state-wrap {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    align-items: flex-start;
+}
+
+@media (max-width: 768px) {
+    .habits-content {
+        grid-template-columns: 1fr;
+    }
+
+    .habits-header {
+        align-items: flex-start;
+    }
+
+    .habit-days {
+        gap: 0.5rem;
+    }
+
+    .day-btn {
+        width: 40px;
+        height: 40px;
+    }
+
+    .habit-card-top {
+        align-items: center;
+    }
+}
+
+.habit-cards::-webkit-scrollbar {
+    width: 8px;
+}
+
+.habit-cards::-webkit-scrollbar-thumb {
+    background: var(--border-strong);
+    border-radius: 999px;
+}
+
+.habit-cards::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+
+
+
+
+base.css
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+    font-family: Arial, sans-serif;
+}
+
+body {
+    background-color: var(--bg);
+    color: var(--text);
+    transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+a {
+    text-decoration: none;
+    color: inherit;
+}
+
+.main-header {
+    background-color: var(--header-bg);
+    border-bottom: 1px solid var(--header-border);
+    padding: 1rem 0;
+    margin-bottom: 2rem;
+    transition: background-color 0.2s ease, border-color 0.2s ease;
+}
+
+.container {
+    width: min(1600px, 96%);
+    margin: 0 auto;
+}
+
+.header-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+}
+
+.header-actions {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+
+.main-nav {
+    display: flex;
+    gap: 1rem;
+}
+
+.main-nav a {
+    color: var(--text);
+    font-weight: 600;
+}
+
+.theme-toggle-btn {
+    width: 44px;
+    height: 44px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--card-bg);
+    color: var(--text);
+    cursor: pointer;
+    font-size: 1.05rem;
+    box-shadow: var(--shadow);
+    transition: background-color 0.2s ease, border-color 0.2s ease, transform 0.15s ease;
+}
+
+.theme-toggle-btn:hover {
+    transform: translateY(-1px);
+}
+
+#themeToggleIcon::before {
+    content: "🌙";
+}
+
+html.dark-mode #themeToggleIcon::before {
+    content: "☀️";
+}
+
+.home-section,
+.habit-list-card,
+.habit-chart-card,
+.habit-modal {
+    background: var(--card-bg);
+    border-radius: 18px;
+    padding: 1.5rem;
+    box-shadow: var(--shadow);
+    transition: background-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.home-section h2,
+.page-header h2 {
+    margin-bottom: 0.5rem;
+}
+
+.home-actions {
+    margin-top: 1rem;
+}
+
+.primary-btn,
+.secondary-btn {
+    display: inline-block;
+    border: none;
+    border-radius: 12px;
+    padding: 0.8rem 1rem;
+    font-size: 0.95rem;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.primary-btn {
+    background: var(--primary);
+    color: white;
+}
+
+.primary-btn:hover {
+    background: var(--primary-hover);
+}
+
+.secondary-btn {
+    background: var(--secondary-bg);
+    color: var(--secondary-text);
+}
+
+.secondary-btn:hover {
+    background: var(--secondary-hover);
+}
+
+.page-header p,
+.section-header p,
+.empty-state,
+.habit-card-top p {
+    color: var(--text-soft);
+}
+
+.icon-add-btn {
+    width: 48px;
+    height: 48px;
+    border-radius: 999px;
+    border: none;
+    background: var(--primary);
+    color: white;
+    font-size: 1.8rem;
+    line-height: 1;
+    cursor: pointer;
+    box-shadow: 0 6px 18px rgba(79, 70, 229, 0.28);
+}
+
+.icon-add-btn:hover {
+    background: var(--primary-hover);
+}
+
+.edit-habit-btn {
+    width: 38px;
+    height: 38px;
+    border-radius: 10px;
+    border: 1px solid var(--border-strong);
+    background: var(--card-bg);
+    color: var(--text);
+    font-size: 1rem;
+    cursor: pointer;
+}
+
+.edit-habit-btn:hover {
+    filter: brightness(1.03);
+}
+
+.modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: var(--overlay);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+    z-index: 1000;
+}
+
+.hidden {
+    display: none !important;
+}
+
+.habit-modal {
+    width: min(460px, 100%);
+    max-height: 90vh;
+    overflow-y: auto;
+}
+
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+    margin-bottom: 1rem;
+}
+
+.modal-close-btn {
+    border: none;
+    background: transparent;
+    font-size: 1.8rem;
+    line-height: 1;
+    cursor: pointer;
+    color: var(--text-soft);
+}
+
+.modal-close-btn:hover {
+    color: var(--text);
+}
+
+.habit-form {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+}
+
+.form-group label {
+    font-weight: 600;
+    color: var(--text);
+}
+
+.form-group input[type="text"],
+.form-group input[type="number"],
+.form-group textarea,
+.form-group select,
+.form-group input[type="date"] {
+    border: 1px solid var(--border-strong);
+    border-radius: 12px;
+    padding: 0.8rem 0.9rem;
+    font-size: 0.95rem;
+    background: var(--input-bg);
+    color: var(--input-text);
+}
+
+.form-group textarea {
+    resize: vertical;
+    min-height: 110px;
+}
+
+.form-group input[type="color"] {
+    width: 100%;
+    height: 48px;
+    border: 1px solid var(--border-strong);
+    border-radius: 12px;
+    background: var(--input-bg);
+    padding: 0.25rem;
+    cursor: pointer;
+}
+
+.modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.75rem;
+    margin-top: 0.5rem;
+}
+
+.danger-btn {
+    display: inline-block;
+    width: 100%;
+    margin-top: 1rem;
+    border: none;
+    border-radius: 12px;
+    padding: 0.8rem 1rem;
+    font-size: 0.95rem;
+    font-weight: 600;
+    cursor: pointer;
+    background: #dc2626;
+    color: white;
+}
+
+.danger-btn:hover {
+    background: #b91c1c;
+}
+
+.delete-habit-form {
+    margin-top: 0.75rem;
+}
+
+.fade-in-page {
+    animation: pageFadeIn 0.22s ease;
+}
+
+@keyframes pageFadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(8px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@media (max-width: 768px) {
+    .header-row {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .header-actions {
+        width: 100%;
+        justify-content: space-between;
+    }
+}
+
+.home-dashboard {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+}
+
+.home-hero-card,
+.home-tasks-card,
+.home-note-card {
+    background: var(--card-bg);
+    border-radius: 18px;
+    padding: 1.5rem;
+    box-shadow: var(--shadow);
+}
+
+.home-hero-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 1rem;
+}
+
+.home-hero-top h2 {
+    font-size: 2rem;
+    margin-bottom: 0.6rem;
+}
+
+.home-hero-top p {
+    color: var(--text-soft);
+    max-width: 850px;
+    line-height: 1.6;
+}
+
+.home-main-grid {
+    display: grid;
+    grid-template-columns: minmax(320px, 420px) minmax(0, 1fr);
+    gap: 1.5rem;
+    align-items: start;
+}
+
+.home-section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+}
+
+.small-add-btn {
+    width: 40px;
+    height: 40px;
+    font-size: 1.5rem;
+}
+
+.home-task-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.85rem;
+}
+
+.home-task-item {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    gap: 0.8rem;
+    align-items: center;
+    padding: 0.9rem 1rem;
+    border-radius: 14px;
+    background: var(--card-alt-bg);
+    border: 1px solid var(--border);
+}
+
+.home-task-item.completed .home-task-title {
+    text-decoration: line-through;
+    color: var(--text-soft);
+}
+
+.home-task-check {
+    width: 30px;
+    height: 30px;
+    border-radius: 999px;
+    border: 1px solid var(--border-strong);
+    background: var(--card-bg);
+    color: var(--primary);
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.home-task-delete {
+    width: 30px;
+    height: 30px;
+    border: none;
+    border-radius: 999px;
+    background: transparent;
+    color: var(--text-soft);
+    font-size: 1.2rem;
+    cursor: pointer;
+}
+
+.home-task-delete:hover {
+    color: #dc2626;
+}
+
+.home-note-content {
+    min-height: 320px;
+    white-space: pre-wrap;
+    line-height: 1.7;
+    color: var(--text);
+}
+
+@media (max-width: 900px) {
+    .home-main-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 768px) {
+    .home-hero-top,
+    .home-section-header {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+}

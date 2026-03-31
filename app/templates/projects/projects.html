@@ -1,0 +1,139 @@
+{% extends "base.html" %}
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/projects.css') }}">
+{% endblock %}{% block title %}Proyectos{% endblock %}
+
+{% block content %}
+<section class="projects-page fade-in-page">
+    <div class="page-header projects-header">
+        <div>
+            <h2>Mis Proyectos</h2>
+            <p>Creá proyectos y entrá a su vista detallada para seguir su evolución.</p>
+        </div>
+
+        <button type="button" class="icon-add-btn" id="openProjectCreateModal" title="Nuevo proyecto">+</button>
+    </div>
+
+    {% if projects %}
+        <section class="projects-list-grid">
+            {% for project in projects %}
+                <a href="{{ url_for('projects.project_detail', project_id=project.id) }}" class="project-card-link">
+                    <article class="project-summary-card">
+                        <div class="project-summary-top">
+                            <h3>{{ project.name }}</h3>
+                            <span class="project-status-badge status-{{ project.status }}">
+                                {{ status_labels[project.status] }}
+                            </span>
+                        </div>
+
+                        <p class="project-date-range">
+                            {% if project.start_date and project.end_date %}
+                                {{ project.start_date.strftime("%d/%m/%Y") }} - {{ project.end_date.strftime("%d/%m/%Y") }}
+                            {% elif project.start_date %}
+                                Inicio: {{ project.start_date.strftime("%d/%m/%Y") }}
+                            {% elif project.end_date %}
+                                Fin: {{ project.end_date.strftime("%d/%m/%Y") }}
+                            {% else %}
+                                Sin fechas definidas
+                            {% endif %}
+                        </p>
+
+                        <p class="project-summary-description">
+                            {{ project.description if project.description else "Sin descripción todavía." }}
+                        </p>
+                    </article>
+                </a>
+            {% endfor %}
+        </section>
+    {% else %}
+        <section class="project-empty-card">
+            <h3>No hay proyectos creados</h3>
+            <p>Empezá creando tu primer proyecto.</p>
+            <button type="button" class="primary-btn" id="emptyProjectCreateBtn">Crear proyecto</button>
+        </section>
+    {% endif %}
+</section>
+
+<div class="modal-overlay hidden" id="projectCreateModalOverlay">
+    <div class="habit-modal hidden" id="projectCreateModal">
+        <div class="modal-header">
+            <h3>Nuevo proyecto</h3>
+            <button type="button" class="modal-close-btn" data-close-project-modal>&times;</button>
+        </div>
+
+        <form method="POST" action="{{ url_for('projects.projects_page') }}" class="habit-form">
+            <div class="form-group">
+                <label for="project-name">Nombre</label>
+                <input type="text" id="project-name" name="name" placeholder="Ej: Renovación del hogar" required>
+            </div>
+
+            <div class="form-group">
+                <label for="project-description">Descripción</label>
+                <textarea id="project-description" name="description" rows="4" placeholder="Descripción del proyecto..."></textarea>
+            </div>
+
+            <div class="form-group">
+                <label for="project-status">Estado</label>
+                <select id="project-status" name="status">
+                    <option value="idea">Idea</option>
+                    <option value="pendiente">Pendiente</option>
+                    <option value="en_progreso">En progreso</option>
+                    <option value="finalizado">Finalizado</option>
+                </select>
+            </div>
+
+            <div class="project-date-grid">
+                <div class="form-group">
+                    <label for="project-start-date">Fecha de inicio</label>
+                    <input type="date" id="project-start-date" name="start_date">
+                </div>
+
+                <div class="form-group">
+                    <label for="project-end-date">Fecha de fin</label>
+                    <input type="date" id="project-end-date" name="end_date">
+                </div>
+            </div>
+
+            <div class="modal-actions">
+                <button type="button" class="secondary-btn" data-close-project-modal>Cancelar</button>
+                <button type="submit" class="primary-btn">Crear proyecto</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+    const projectModalOverlay = document.getElementById("projectCreateModalOverlay");
+    const projectCreateModal = document.getElementById("projectCreateModal");
+    const openProjectCreateModalBtn = document.getElementById("openProjectCreateModal");
+    const emptyProjectCreateBtn = document.getElementById("emptyProjectCreateBtn");
+
+    function closeProjectModal() {
+        projectModalOverlay.classList.add("hidden");
+        projectCreateModal.classList.add("hidden");
+    }
+
+    function openProjectModal() {
+        projectModalOverlay.classList.remove("hidden");
+        projectCreateModal.classList.remove("hidden");
+    }
+
+    if (openProjectCreateModalBtn) {
+        openProjectCreateModalBtn.addEventListener("click", openProjectModal);
+    }
+
+    if (emptyProjectCreateBtn) {
+        emptyProjectCreateBtn.addEventListener("click", openProjectModal);
+    }
+
+    document.querySelectorAll("[data-close-project-modal]").forEach(btn => {
+        btn.addEventListener("click", closeProjectModal);
+    });
+
+    projectModalOverlay.addEventListener("click", (e) => {
+        if (e.target === projectModalOverlay) {
+            closeProjectModal();
+        }
+    });
+</script>
+{% endblock %}

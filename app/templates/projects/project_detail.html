@@ -1,0 +1,925 @@
+{% extends "base.html" %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/projects.css') }}">
+{% endblock %}
+
+{% block title %}{{ project.name }}{% endblock %}
+
+{% block content %}
+<section class="project-detail-page fade-in-page">
+    <div class="project-detail-header">
+        <a href="{{ url_for('projects.projects_page') }}" class="back-link-btn">← Volver a proyectos</a>
+    </div>
+
+    <section class="project-detail-card">
+        <div class="project-detail-top">
+            <div>
+                <h2>{{ project.name }}</h2>
+
+                <div class="project-meta-row">
+                    <span class="project-status-badge status-{{ project.status }}">
+                        {{ status_labels[project.status] }}
+                    </span>
+
+                    <span class="project-date-range detail-date-range">
+                        {% if project.start_date and project.end_date %}
+                            {{ project.start_date.strftime("%d/%m/%Y") }} - {{ project.end_date.strftime("%d/%m/%Y") }}
+                        {% elif project.start_date %}
+                            Inicio: {{ project.start_date.strftime("%d/%m/%Y") }}
+                        {% elif project.end_date %}
+                            Fin: {{ project.end_date.strftime("%d/%m/%Y") }}
+                        {% else %}
+                            Sin fechas definidas
+                        {% endif %}
+                    </span>
+                </div>
+            </div>
+
+            <button type="button" class="primary-btn" id="openProjectEditModal">Editar proyecto</button>
+        </div>
+
+        <div class="project-detail-section">
+            <h3>Descripción</h3>
+            <p class="project-detail-description">
+                {{ project.description if project.description else "Sin descripción todavía." }}
+            </p>
+        </div>
+
+        <div class="project-detail-section">
+            <div class="kanban-section-header">
+                <h3>Kanban</h3>
+                <button type="button" class="primary-btn" id="openTaskCreateModal" data-default-column="pendiente">Agregar tarea</button>
+            </div>
+
+            <div class="kanban-board">
+                {% for column_key, column_label in kanban_columns.items() %}
+                    <section class="kanban-column kanban-column-{{ column_key }}">
+                        <div class="kanban-column-header">
+                            <h4>{{ column_label }}</h4>
+                            <button
+                                type="button"
+                                class="kanban-add-btn"
+                                data-open-task-create
+                                data-column="{{ column_key }}"
+                                title="Agregar tarea"
+                            >
+                                +
+                            </button>
+                        </div>
+
+                        <div class="kanban-cards" id="kanban-column-{{ column_key }}" data-column="{{ column_key }}">
+                            {% if kanban_tasks[column_key] %}
+                                {% for task in kanban_tasks[column_key] %}
+                                    <article class="kanban-card" draggable="true" data-task-id="{{ task.id }}" id="kanban-task-{{ task.id }}">
+                                        <div class="kanban-card-top">
+                                            <h5>{{ task.title }}</h5>
+                                            <button
+                                                type="button"
+                                                class="edit-habit-btn edit-task-btn"
+                                                data-id="{{ task.id }}"
+                                                data-title="{{ task.title }}"
+                                                data-description="{{ task.description if task.description else '' }}"
+                                                data-column="{{ task.column_name }}"
+                                                title="Editar tarea"
+                                            >
+                                                ✎
+                                            </button>
+                                        </div>
+
+                                        {% if task.description %}
+                                            <p class="kanban-card-description">
+                                                {{ task.description }}
+                                            </p>
+                                        {% endif %}
+                                    </article>
+                                {% endfor %}
+                            {% endif %}
+                        </div>
+                    </section>
+                {% endfor %}
+            </div>
+        </div>
+
+        <div class="project-detail-section">
+            <div class="timeline-section-header">
+                <h3>Timeline</h3>
+                <button type="button" class="primary-btn" id="openEventCreateModal">Agregar evento</button>
+            </div>
+
+            {% if project.events %}
+                <div class="project-timeline" id="projectTimeline">
+                    {% for event in project.events %}
+                        <article class="timeline-event" id="timeline-event-{{ event.id }}">
+                            <div class="timeline-dot"></div>
+
+                            <div class="timeline-content">
+                                <div class="timeline-content-top">
+                                    <div>
+                                        <h4>{{ event.title }}</h4>
+                                        <p class="timeline-date">
+                                            {% if event.event_date %}
+                                                {{ event.event_date.strftime("%d/%m/%Y") }}
+                                            {% else %}
+                                                Sin fecha definida
+                                            {% endif %}
+                                        </p>
+                                    </div>
+
+                                    <div class="timeline-event-actions">
+                                        <button
+                                            type="button"
+                                            class="edit-habit-btn edit-event-btn"
+                                            data-id="{{ event.id }}"
+                                            data-title="{{ event.title }}"
+                                            data-description="{{ event.description if event.description else '' }}"
+                                            data-date="{{ event.event_date.isoformat() if event.event_date else '' }}"
+                                            title="Editar evento"
+                                        >
+                                            ✎
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <p class="timeline-description">
+                                    {{ event.description if event.description else "Sin descripción." }}
+                                </p>
+                            </div>
+                        </article>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <div class="project-timeline" id="projectTimeline"></div>
+                <div class="timeline-empty-state" id="timelineEmptyState">
+                    <p>Este proyecto todavía no tiene eventos en la timeline.</p>
+                </div>
+            {% endif %}
+        </div>
+    </section>
+</section>
+
+<!-- Modal editar proyecto -->
+<div class="modal-overlay hidden" id="projectEditModalOverlay">
+    <div class="habit-modal hidden" id="projectEditModal">
+        <div class="modal-header">
+            <h3>Editar proyecto</h3>
+            <button type="button" class="modal-close-btn" data-close-project-edit-modal>&times;</button>
+        </div>
+
+        <form method="POST" action="{{ url_for('projects.edit_project', project_id=project.id) }}" class="habit-form">
+            <div class="form-group">
+                <label for="edit-project-name">Nombre</label>
+                <input type="text" id="edit-project-name" name="name" value="{{ project.name }}" required>
+            </div>
+
+            <div class="form-group">
+                <label for="edit-project-description">Descripción</label>
+                <textarea id="edit-project-description" name="description" rows="4">{{ project.description if project.description else '' }}</textarea>
+            </div>
+
+            <div class="form-group">
+                <label for="edit-project-status">Estado</label>
+                <select id="edit-project-status" name="status">
+                    <option value="idea" {% if project.status == 'idea' %}selected{% endif %}>Idea</option>
+                    <option value="pendiente" {% if project.status == 'pendiente' %}selected{% endif %}>Pendiente</option>
+                    <option value="en_progreso" {% if project.status == 'en_progreso' %}selected{% endif %}>En progreso</option>
+                    <option value="finalizado" {% if project.status == 'finalizado' %}selected{% endif %}>Finalizado</option>
+                </select>
+            </div>
+
+            <div class="project-date-grid">
+                <div class="form-group">
+                    <label for="edit-project-start-date">Fecha de inicio</label>
+                    <input
+                        type="date"
+                        id="edit-project-start-date"
+                        name="start_date"
+                        value="{{ project.start_date.isoformat() if project.start_date else '' }}"
+                    >
+                </div>
+
+                <div class="form-group">
+                    <label for="edit-project-end-date">Fecha de fin</label>
+                    <input
+                        type="date"
+                        id="edit-project-end-date"
+                        name="end_date"
+                        value="{{ project.end_date.isoformat() if project.end_date else '' }}"
+                    >
+                </div>
+            </div>
+
+            <div class="modal-actions">
+                <button type="button" class="secondary-btn" data-close-project-edit-modal>Cancelar</button>
+                <button type="submit" class="primary-btn">Guardar cambios</button>
+            </div>
+        </form>
+
+        <form
+            method="POST"
+            action="{{ url_for('projects.delete_project', project_id=project.id) }}"
+            class="delete-habit-form"
+            onsubmit="return confirm('¿Seguro que querés eliminar este proyecto?');"
+        >
+            <button type="submit" class="danger-btn">Eliminar proyecto</button>
+        </form>
+    </div>
+</div>
+
+<!-- Modal crear tarea -->
+<div class="modal-overlay hidden" id="taskCreateModalOverlay">
+    <div class="habit-modal hidden" id="taskCreateModal">
+        <div class="modal-header">
+            <h3>Nueva tarea</h3>
+            <button type="button" class="modal-close-btn" data-close-task-create-modal>&times;</button>
+        </div>
+
+        <form method="POST" action="{{ url_for('projects.create_project_task', project_id=project.id) }}" class="habit-form" id="taskCreateForm">
+            <div class="form-group">
+                <label for="task-title">Título</label>
+                <input type="text" id="task-title" name="title" placeholder="Ej: Definir alcance" required>
+            </div>
+
+            <div class="form-group">
+                <label for="task-description">Descripción</label>
+                <textarea id="task-description" name="description" rows="4" placeholder="Detalle opcional..."></textarea>
+            </div>
+
+            <div class="form-group">
+                <label for="task-column-name">Columna</label>
+                <select id="task-column-name" name="column_name">
+                    <option value="pendiente">Pendientes</option>
+                    <option value="en_progreso">En Progreso</option>
+                    <option value="completado">Completado</option>
+                </select>
+            </div>
+
+            <div class="modal-actions">
+                <button type="button" class="secondary-btn" data-close-task-create-modal>Cancelar</button>
+                <button type="submit" class="primary-btn">Agregar tarea</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Modal editar tarea -->
+<div class="modal-overlay hidden" id="taskEditModalOverlay">
+    <div class="habit-modal hidden" id="taskEditModal">
+        <div class="modal-header">
+            <h3>Editar tarea</h3>
+            <button type="button" class="modal-close-btn" data-close-task-edit-modal>&times;</button>
+        </div>
+
+        <form method="POST" id="taskEditForm" class="habit-form">
+            <div class="form-group">
+                <label for="edit-task-title">Título</label>
+                <input type="text" id="edit-task-title" name="title" required>
+            </div>
+
+            <div class="form-group">
+                <label for="edit-task-description">Descripción</label>
+                <textarea id="edit-task-description" name="description" rows="4"></textarea>
+            </div>
+
+            <div class="form-group">
+                <label for="edit-task-column-name">Columna</label>
+                <select id="edit-task-column-name" name="column_name">
+                    <option value="pendiente">Pendientes</option>
+                    <option value="en_progreso">En Progreso</option>
+                    <option value="completado">Completado</option>
+                </select>
+            </div>
+
+            <div class="modal-actions">
+                <button type="button" class="secondary-btn" data-close-task-edit-modal>Cancelar</button>
+                <button type="submit" class="primary-btn">Guardar cambios</button>
+            </div>
+        </form>
+
+        <form
+            method="POST"
+            id="taskDeleteForm"
+            class="delete-habit-form"
+            onsubmit="return confirm('¿Seguro que querés eliminar esta tarea?');"
+        >
+            <button type="submit" class="danger-btn">Eliminar tarea</button>
+        </form>
+    </div>
+</div>
+
+<!-- Modal crear evento -->
+<div class="modal-overlay hidden" id="eventCreateModalOverlay">
+    <div class="habit-modal hidden" id="eventCreateModal">
+        <div class="modal-header">
+            <h3>Nuevo evento</h3>
+            <button type="button" class="modal-close-btn" data-close-event-create-modal>&times;</button>
+        </div>
+
+        <form method="POST" action="{{ url_for('projects.create_project_event', project_id=project.id) }}" class="habit-form" id="eventCreateForm">
+            <div class="form-group">
+                <label for="event-title">Título</label>
+                <input type="text" id="event-title" name="title" placeholder="Ej: Inicio del proyecto" required>
+            </div>
+
+            <div class="form-group">
+                <label for="event-description">Comentario / descripción</label>
+                <textarea id="event-description" name="description" rows="4" placeholder="Detalle del evento..."></textarea>
+            </div>
+
+            <div class="form-group">
+                <label for="event-date">Fecha</label>
+                <input type="date" id="event-date" name="event_date">
+            </div>
+
+            <div class="modal-actions">
+                <button type="button" class="secondary-btn" data-close-event-create-modal>Cancelar</button>
+                <button type="submit" class="primary-btn">Agregar evento</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Modal editar evento -->
+<div class="modal-overlay hidden" id="eventEditModalOverlay">
+    <div class="habit-modal hidden" id="eventEditModal">
+        <div class="modal-header">
+            <h3>Editar evento</h3>
+            <button type="button" class="modal-close-btn" data-close-event-edit-modal>&times;</button>
+        </div>
+
+        <form method="POST" id="eventEditForm" class="habit-form">
+            <div class="form-group">
+                <label for="edit-event-title">Título</label>
+                <input type="text" id="edit-event-title" name="title" required>
+            </div>
+
+            <div class="form-group">
+                <label for="edit-event-description">Comentario / descripción</label>
+                <textarea id="edit-event-description" name="description" rows="4"></textarea>
+            </div>
+
+            <div class="form-group">
+                <label for="edit-event-date">Fecha</label>
+                <input type="date" id="edit-event-date" name="event_date">
+            </div>
+
+            <div class="modal-actions">
+                <button type="button" class="secondary-btn" data-close-event-edit-modal>Cancelar</button>
+                <button type="submit" class="primary-btn">Guardar cambios</button>
+            </div>
+        </form>
+
+        <form
+            method="POST"
+            id="eventDeleteForm"
+            class="delete-habit-form"
+            onsubmit="return confirm('¿Seguro que querés eliminar este evento?');"
+        >
+            <button type="submit" class="danger-btn">Eliminar evento</button>
+        </form>
+    </div>
+</div>
+
+<script>
+    const projectEditOverlay = document.getElementById("projectEditModalOverlay");
+    const projectEditModal = document.getElementById("projectEditModal");
+    const openProjectEditModalBtn = document.getElementById("openProjectEditModal");
+
+    const taskCreateOverlay = document.getElementById("taskCreateModalOverlay");
+    const taskCreateModal = document.getElementById("taskCreateModal");
+    const openTaskCreateModalBtn = document.getElementById("openTaskCreateModal");
+
+    const taskEditOverlay = document.getElementById("taskEditModalOverlay");
+    const taskEditModal = document.getElementById("taskEditModal");
+    const taskEditForm = document.getElementById("taskEditForm");
+    const taskDeleteForm = document.getElementById("taskDeleteForm");
+
+    const eventCreateOverlay = document.getElementById("eventCreateModalOverlay");
+    const eventCreateModal = document.getElementById("eventCreateModal");
+    const openEventCreateModalBtn = document.getElementById("openEventCreateModal");
+
+    const eventEditOverlay = document.getElementById("eventEditModalOverlay");
+    const eventEditModal = document.getElementById("eventEditModal");
+    const eventEditForm = document.getElementById("eventEditForm");
+    const eventDeleteForm = document.getElementById("eventDeleteForm");
+
+    function closeProjectEditModal() {
+        projectEditOverlay.classList.add("hidden");
+        projectEditModal.classList.add("hidden");
+    }
+
+    function openProjectEditModal() {
+        projectEditOverlay.classList.remove("hidden");
+        projectEditModal.classList.remove("hidden");
+    }
+
+    function closeTaskCreateModal() {
+        taskCreateOverlay.classList.add("hidden");
+        taskCreateModal.classList.add("hidden");
+    }
+
+    function openTaskCreateModal(defaultColumn = "pendiente") {
+        document.getElementById("task-column-name").value = defaultColumn;
+        taskCreateOverlay.classList.remove("hidden");
+        taskCreateModal.classList.remove("hidden");
+    }
+
+    function closeTaskEditModal() {
+        taskEditOverlay.classList.add("hidden");
+        taskEditModal.classList.add("hidden");
+    }
+
+    function openTaskEditModal(id, title, description, columnName) {
+        taskEditForm.action = `/projects/tasks/${id}/edit`;
+        taskDeleteForm.action = `/projects/tasks/${id}/delete`;
+
+        document.getElementById("edit-task-title").value = title;
+        document.getElementById("edit-task-description").value = description || "";
+        document.getElementById("edit-task-column-name").value = columnName || "pendiente";
+
+        taskEditOverlay.classList.remove("hidden");
+        taskEditModal.classList.remove("hidden");
+    }
+
+    function closeEventCreateModal() {
+        eventCreateOverlay.classList.add("hidden");
+        eventCreateModal.classList.add("hidden");
+    }
+
+    function openEventCreateModal() {
+        eventCreateOverlay.classList.remove("hidden");
+        eventCreateModal.classList.remove("hidden");
+    }
+
+    function closeEventEditModal() {
+        eventEditOverlay.classList.add("hidden");
+        eventEditModal.classList.add("hidden");
+    }
+
+    function openEventEditModal(id, title, description, dateValue) {
+        eventEditForm.action = `/projects/events/${id}/edit`;
+        eventDeleteForm.action = `/projects/events/${id}/delete`;
+
+        document.getElementById("edit-event-title").value = title;
+        document.getElementById("edit-event-description").value = description || "";
+        document.getElementById("edit-event-date").value = dateValue || "";
+
+        eventEditOverlay.classList.remove("hidden");
+        eventEditModal.classList.remove("hidden");
+    }
+
+    if (openProjectEditModalBtn) {
+        openProjectEditModalBtn.addEventListener("click", openProjectEditModal);
+    }
+
+    if (openTaskCreateModalBtn) {
+        openTaskCreateModalBtn.addEventListener("click", () => openTaskCreateModal("pendiente"));
+    }
+
+    document.querySelectorAll("[data-open-task-create]").forEach(btn => {
+        btn.addEventListener("click", () => {
+            openTaskCreateModal(btn.dataset.column || "pendiente");
+        });
+    });
+
+    if (openEventCreateModalBtn) {
+        openEventCreateModalBtn.addEventListener("click", openEventCreateModal);
+    }
+
+    document.querySelectorAll("[data-close-project-edit-modal]").forEach(btn => {
+        btn.addEventListener("click", closeProjectEditModal);
+    });
+
+    document.querySelectorAll("[data-close-task-create-modal]").forEach(btn => {
+        btn.addEventListener("click", closeTaskCreateModal);
+    });
+
+    document.querySelectorAll("[data-close-task-edit-modal]").forEach(btn => {
+        btn.addEventListener("click", closeTaskEditModal);
+    });
+
+    document.querySelectorAll("[data-close-event-create-modal]").forEach(btn => {
+        btn.addEventListener("click", closeEventCreateModal);
+    });
+
+    document.querySelectorAll("[data-close-event-edit-modal]").forEach(btn => {
+        btn.addEventListener("click", closeEventEditModal);
+    });
+
+    projectEditOverlay.addEventListener("click", (e) => {
+        if (e.target === projectEditOverlay) {
+            closeProjectEditModal();
+        }
+    });
+
+    taskCreateOverlay.addEventListener("click", (e) => {
+        if (e.target === taskCreateOverlay) {
+            closeTaskCreateModal();
+        }
+    });
+
+    taskEditOverlay.addEventListener("click", (e) => {
+        if (e.target === taskEditOverlay) {
+            closeTaskEditModal();
+        }
+    });
+
+    eventCreateOverlay.addEventListener("click", (e) => {
+        if (e.target === eventCreateOverlay) {
+            closeEventCreateModal();
+        }
+    });
+
+    eventEditOverlay.addEventListener("click", (e) => {
+        if (e.target === eventEditOverlay) {
+            closeEventEditModal();
+        }
+    });
+
+    function escapeHtml(text) {
+        const div = document.createElement("div");
+        div.textContent = text || "";
+        return div.innerHTML;
+    }
+
+    let draggedTask = null;
+
+    function getDropIndex(container, clientY) {
+        const cards = [...container.querySelectorAll(".kanban-card:not(.dragging)")];
+        for (let i = 0; i < cards.length; i++) {
+            const rect = cards[i].getBoundingClientRect();
+            const midpoint = rect.top + rect.height / 2;
+            if (clientY < midpoint) {
+                return i;
+            }
+        }
+        return cards.length;
+    }
+
+    async function persistTaskMove(taskId, targetColumn, targetIndex) {
+        const response = await fetch(`/projects/tasks/${taskId}/move`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+                target_column: targetColumn,
+                target_index: targetIndex
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error("No se pudo mover la tarea");
+        }
+    }
+
+    function buildTaskCard(task) {
+        const descriptionHtml = task.description
+            ? `<p class="kanban-card-description">${escapeHtml(task.description)}</p>`
+            : "";
+
+        const article = document.createElement("article");
+        article.className = "kanban-card";
+        article.setAttribute("draggable", "true");
+        article.dataset.taskId = task.id;
+        article.id = `kanban-task-${task.id}`;
+
+        article.innerHTML = `
+            <div class="kanban-card-top">
+                <h5>${escapeHtml(task.title)}</h5>
+                <button
+                    type="button"
+                    class="edit-habit-btn edit-task-btn"
+                    data-id="${task.id}"
+                    data-title="${escapeHtml(task.title)}"
+                    data-description="${escapeHtml(task.description || "")}"
+                    data-column="${task.column_name}"
+                    title="Editar tarea"
+                >
+                    ✎
+                </button>
+            </div>
+            ${descriptionHtml}
+        `;
+
+        article.querySelector(".edit-task-btn").addEventListener("click", () => {
+            openTaskEditModal(
+                task.id,
+                task.title,
+                task.description || "",
+                task.column_name
+            );
+        });
+
+        article.addEventListener("dragstart", () => {
+            draggedTask = article;
+            article.classList.add("dragging");
+        });
+
+        article.addEventListener("dragend", async () => {
+            if (!draggedTask) return;
+
+            const movedTask = draggedTask;
+            const parentColumn = movedTask.closest(".kanban-cards");
+            const taskId = movedTask.dataset.taskId;
+            const targetColumn = parentColumn.dataset.column;
+            const cards = [...parentColumn.querySelectorAll(".kanban-card")];
+            const targetIndex = cards.indexOf(movedTask);
+
+            movedTask.classList.remove("dragging");
+            draggedTask = null;
+
+            try {
+                await persistTaskMove(taskId, targetColumn, targetIndex);
+            } catch (error) {
+                console.error("Error al mover tarea:", error);
+            }
+        });
+
+        return article;
+    }
+
+    function buildTimelineEvent(event) {
+        const article = document.createElement("article");
+        article.className = "timeline-event";
+        article.id = `timeline-event-${event.id}`;
+
+        article.innerHTML = `
+            <div class="timeline-dot"></div>
+            <div class="timeline-content">
+                <div class="timeline-content-top">
+                    <div>
+                        <h4>${escapeHtml(event.title)}</h4>
+                        <p class="timeline-date">${escapeHtml(event.event_date_display)}</p>
+                    </div>
+                    <div class="timeline-event-actions">
+                        <button
+                            type="button"
+                            class="edit-habit-btn edit-event-btn"
+                            data-id="${event.id}"
+                            data-title="${escapeHtml(event.title)}"
+                            data-description="${escapeHtml(event.description || "")}"
+                            data-date="${event.event_date || ""}"
+                            title="Editar evento"
+                        >
+                            ✎
+                        </button>
+                    </div>
+                </div>
+                <p class="timeline-description">${escapeHtml(event.description || "Sin descripción.")}</p>
+            </div>
+        `;
+
+        article.querySelector(".edit-event-btn").addEventListener("click", () => {
+            openEventEditModal(
+                event.id,
+                event.title,
+                event.description || "",
+                event.event_date || ""
+            );
+        });
+
+        return article;
+    }
+
+    document.querySelectorAll(".kanban-card").forEach(card => {
+        card.addEventListener("dragstart", () => {
+            draggedTask = card;
+            card.classList.add("dragging");
+        });
+
+        card.addEventListener("dragend", async () => {
+            if (!draggedTask) return;
+
+            const movedTask = draggedTask;
+            const parentColumn = movedTask.closest(".kanban-cards");
+            const taskId = movedTask.dataset.taskId;
+            const targetColumn = parentColumn.dataset.column;
+            const cards = [...parentColumn.querySelectorAll(".kanban-card")];
+            const targetIndex = cards.indexOf(movedTask);
+
+            movedTask.classList.remove("dragging");
+            draggedTask = null;
+
+            try {
+                await persistTaskMove(taskId, targetColumn, targetIndex);
+            } catch (error) {
+                console.error("Error al mover tarea:", error);
+            }
+        });
+    });
+
+    document.querySelectorAll(".kanban-cards").forEach(column => {
+        column.addEventListener("dragenter", (e) => {
+            e.preventDefault();
+            column.classList.add("drag-over");
+        });
+
+        column.addEventListener("dragleave", (e) => {
+            if (!column.contains(e.relatedTarget)) {
+                column.classList.remove("drag-over");
+            }
+        });
+
+        column.addEventListener("dragover", (e) => {
+            e.preventDefault();
+            if (!draggedTask) return;
+
+            const dropIndex = getDropIndex(column, e.clientY);
+            const cards = [...column.querySelectorAll(".kanban-card:not(.dragging)")];
+
+            if (cards.length === 0 || dropIndex >= cards.length) {
+                column.appendChild(draggedTask);
+            } else {
+                column.insertBefore(draggedTask, cards[dropIndex]);
+            }
+        });
+
+        column.addEventListener("drop", () => {
+            column.classList.remove("drag-over");
+        });
+    });
+
+    document.querySelectorAll(".edit-task-btn").forEach(btn => {
+        btn.addEventListener("click", () => {
+            openTaskEditModal(
+                btn.dataset.id,
+                btn.dataset.title,
+                btn.dataset.description,
+                btn.dataset.column
+            );
+        });
+    });
+
+    document.querySelectorAll(".edit-event-btn").forEach(btn => {
+        btn.addEventListener("click", () => {
+            openEventEditModal(
+                btn.dataset.id,
+                btn.dataset.title,
+                btn.dataset.description,
+                btn.dataset.date
+            );
+        });
+    });
+
+    const taskCreateForm = document.getElementById("taskCreateForm");
+    const eventCreateForm = document.getElementById("eventCreateForm");
+
+    if (taskCreateForm) {
+        taskCreateForm.addEventListener("submit", async (e) => {
+            e.preventDefault();
+
+            const formData = new FormData(taskCreateForm);
+
+            const response = await fetch(taskCreateForm.action, {
+                method: "POST",
+                headers: { "X-Requested-With": "XMLHttpRequest" },
+                body: formData
+            });
+
+            const data = await response.json();
+            if (!data.ok) return;
+
+            const column = document.getElementById(`kanban-column-${data.task.column_name}`);
+            if (column) {
+                column.appendChild(buildTaskCard(data.task));
+            }
+
+            taskCreateForm.reset();
+            closeTaskCreateModal();
+        });
+    }
+
+    if (taskEditForm) {
+        taskEditForm.addEventListener("submit", async (e) => {
+            e.preventDefault();
+
+            const formData = new FormData(taskEditForm);
+
+            const response = await fetch(taskEditForm.action, {
+                method: "POST",
+                headers: { "X-Requested-With": "XMLHttpRequest" },
+                body: formData
+            });
+
+            const data = await response.json();
+            if (!data.ok) return;
+
+            const oldCard = document.getElementById(`kanban-task-${data.task.id}`);
+            if (oldCard) oldCard.remove();
+
+            const targetColumn = document.getElementById(`kanban-column-${data.task.column_name}`);
+            if (targetColumn) {
+                targetColumn.appendChild(buildTaskCard(data.task));
+            }
+
+            closeTaskEditModal();
+        });
+    }
+
+    if (taskDeleteForm) {
+        taskDeleteForm.addEventListener("submit", async (e) => {
+            e.preventDefault();
+            if (!confirm("¿Seguro que querés eliminar esta tarea?")) return;
+
+            const response = await fetch(taskDeleteForm.action, {
+                method: "POST",
+                headers: { "X-Requested-With": "XMLHttpRequest" }
+            });
+
+            const data = await response.json();
+            if (!data.ok) return;
+
+            const oldCard = document.getElementById(`kanban-task-${data.task_id}`);
+            if (oldCard) oldCard.remove();
+
+            closeTaskEditModal();
+        });
+    }
+
+    if (eventCreateForm) {
+        eventCreateForm.addEventListener("submit", async (e) => {
+            e.preventDefault();
+
+            const formData = new FormData(eventCreateForm);
+
+            const response = await fetch(eventCreateForm.action, {
+                method: "POST",
+                headers: { "X-Requested-With": "XMLHttpRequest" },
+                body: formData
+            });
+
+            const data = await response.json();
+            if (!data.ok) return;
+
+            const timeline = document.getElementById("projectTimeline");
+            const emptyState = document.getElementById("timelineEmptyState");
+
+            if (emptyState) emptyState.remove();
+
+            if (timeline) {
+                timeline.appendChild(buildTimelineEvent(data.event));
+            }
+
+            eventCreateForm.reset();
+            closeEventCreateModal();
+        });
+    }
+
+    if (eventEditForm) {
+        eventEditForm.addEventListener("submit", async (e) => {
+            e.preventDefault();
+
+            const formData = new FormData(eventEditForm);
+
+            const response = await fetch(eventEditForm.action, {
+                method: "POST",
+                headers: { "X-Requested-With": "XMLHttpRequest" },
+                body: formData
+            });
+
+            const data = await response.json();
+            if (!data.ok) return;
+
+            const oldEvent = document.getElementById(`timeline-event-${data.event.id}`);
+            const newEvent = buildTimelineEvent(data.event);
+
+            if (oldEvent) {
+                oldEvent.replaceWith(newEvent);
+            }
+
+            closeEventEditModal();
+        });
+    }
+
+    if (eventDeleteForm) {
+        eventDeleteForm.addEventListener("submit", async (e) => {
+            e.preventDefault();
+            if (!confirm("¿Seguro que querés eliminar este evento?")) return;
+
+            const response = await fetch(eventDeleteForm.action, {
+                method: "POST",
+                headers: { "X-Requested-With": "XMLHttpRequest" }
+            });
+
+            const data = await response.json();
+            if (!data.ok) return;
+
+            const oldEvent = document.getElementById(`timeline-event-${data.event_id}`);
+            if (oldEvent) oldEvent.remove();
+
+            const timeline = document.getElementById("projectTimeline");
+            if (timeline && timeline.children.length === 0) {
+                const section = timeline.parentElement;
+                const empty = document.createElement("div");
+                empty.className = "timeline-empty-state";
+                empty.id = "timelineEmptyState";
+                empty.innerHTML = "<p>Este proyecto todavía no tiene eventos en la timeline.</p>";
+                section.appendChild(empty);
+            }
+
+            closeEventEditModal();
+        });
+    }
+</script>
+{% endblock %}

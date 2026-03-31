@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Rastreador de Hábitos{% endblock %}</title>
+
+    <script>
+        (function () {
+            const savedTheme = localStorage.getItem("habit-theme");
+            const isDark = savedTheme === "dark";
+
+            if (isDark) {
+                document.documentElement.classList.add("dark-mode");
+            }
+
+            document.documentElement.setAttribute(
+                "data-theme-icon",
+                isDark ? "☀️" : "🌙"
+            );
+        })();
+    </script>
+
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/themes.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/base.css') }}">
+{% block extra_css %}{% endblock %}</head>
+<body>
+    <header class="main-header">
+        <div class="container header-row">
+            <h1><a href="{{ url_for('dashboard.index') }}">Organizate</a></h1>
+
+            <div class="header-actions">
+                <nav class="main-nav">
+                    <a href="{{ url_for('dashboard.index') }}">Hola</a>
+                    <a href="{{ url_for('habits.habits_page') }}">Hábitos</a>
+                    <a href="{{ url_for('projects.projects_page') }}">Proyectos</a>
+                </nav>
+
+                <button id="themeToggle" class="theme-toggle-btn" type="button" aria-label="Cambiar tema">
+                    <span id="themeToggleIcon"></span>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <main class="container">
+        {% block content %}{% endblock %}
+    </main>
+
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>

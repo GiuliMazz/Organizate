@@ -1,0 +1,400 @@
+{% extends "base.html" %}
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/habits.css') }}">
+{% endblock %}
+{% block title %}Hábitos - Rastreador{% endblock %}
+
+{% block content %}
+<section class="habits-page">
+    <div class="page-header habits-header">
+        <div>
+            <h2>Mis Hábitos</h2>
+            <p>Creá hábitos, marcá los días cumplidos y seguí tu progreso semanal.</p>
+        </div>
+
+        <button type="button" class="icon-add-btn" id="openCreateModal" title="Nuevo hábito">+</button>
+    </div>
+
+    <div class="habits-content">
+        <section class="habit-list-card">
+            <div class="section-header">
+                <h3>Lista de hábitos</h3>
+            </div>
+
+            {% if habits_data %}
+                <div class="habit-cards">
+                    {% for item in habits_data %}
+                        {% set habit_index = loop.index0 %}
+                        <article class="habit-card">
+                            <div class="habit-card-top">
+                                <div>
+                                    <h4>
+                                        {{ item.habit.name }} 
+                                        <span class="streak-badge" id="habit-streak-{{ item.habit.id }}" title="Semanas cumplidas al hilo">
+                                            🔥 {{ item.streak }}
+                                        </span>
+                                    </h4>
+                                    <p id="habit-count-{{ item.habit.id }}">
+                                        {{ item.completed_count }}/{{ item.habit.weekly_goal }}
+                                        veces esta semana
+                                    </p>
+                                </div>
+
+                                <div class="habit-actions-top">
+                                    <span id="habit-badge-{{ item.habit.id }}" class="habit-badge" style="color: {{ item.habit.color }};">
+                                        {{ item.completed_count }}
+                                    </span>
+
+                                    <button
+                                        type="button"
+                                        class="edit-habit-btn"
+                                        data-id="{{ item.habit.id }}"
+                                        data-name="{{ item.habit.name }}"
+                                        data-color="{{ item.habit.color }}"
+                                        data-goal="{{ item.habit.weekly_goal }}"
+                                        title="Editar hábito"
+                                    >
+                                        ✎
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div class="habit-progress">
+                                <div class="habit-progress-track">
+                                    <div
+                                        id="habit-progress-{{ item.habit.id }}"
+                                        class="habit-progress-fill"
+                                        style="width: {{ item.progress_percent }}%; background-color: {{ item.habit.color }};"
+                                    ></div>
+                                </div>
+                            </div>
+
+                            <div class="habit-days">
+                                {% for day in item.week_days %}
+                                    <button
+                                        type="button"
+                                        class="day-btn js-day-btn {% if day.completed %}completed{% endif %} {% if day.is_today %}today{% endif %}"
+                                        data-url="{{ url_for('habits.toggle_habit_day', habit_id=item.habit.id, day_str=day.date.isoformat()) }}"
+                                        data-color="{{ item.habit.color }}"
+                                        data-habit-id="{{ item.habit.id }}"
+                                        data-chart-index="{{ habit_index }}"
+                                        {% if day.completed %}
+                                            style="background-color: {{ item.habit.color }}; border-color: {{ item.habit.color }}; color: white;"
+                                        {% endif %}
+                                    >
+                                        {{ day.letter }}
+                                    </button>
+                                {% endfor %}
+                            </div>
+                        </article>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <div class="empty-state-wrap">
+                    <p class="empty-state">Todavía no hay hábitos creados.</p>
+                    <button type="button" class="primary-btn" id="emptyCreateBtn">Crear primer hábito</button>
+                </div>
+            {% endif %}
+        </section>
+
+        <section class="habit-chart-card">
+            <h3>Progreso de Hábitos</h3>
+            <div class="chart-container">
+                <canvas id="habitsChart"></canvas>
+            </div>
+        </section>
+    </div><section class="global-heatmap-card">
+        <h3>Consistencia General (Últimos 90 días)</h3>
+        <div class="global-heatmap-container">
+            {% for hd in global_heatmap %}
+                <div class="global-heatmap-day intensity-{{ hd.intensity }}"
+                     title="{{ hd.date.strftime('%d/%m/%Y') }} - {{ hd.count }} hábitos completados">
+                </div>
+            {% endfor %}
+        </div>
+    </section>
+</section>
+
+<div class="modal-overlay hidden" id="habitModalOverlay">
+    <div class="habit-modal hidden" id="createHabitModal">
+        <div class="modal-header">
+            <h3>Nuevo hábito</h3>
+            <button type="button" class="modal-close-btn" data-close-modal>&times;</button>
+        </div>
+
+        <form method="POST" action="{{ url_for('habits.habits_page') }}" class="habit-form">
+            <div class="form-group">
+                <label for="create-name">Nombre</label>
+                <input type="text" id="create-name" name="name" placeholder="Ej: Ejercicio" required>
+            </div>
+
+            <div class="form-group">
+                <label for="create-color">Color</label>
+                <input type="color" id="create-color" name="color" value="#22c55e">
+            </div>
+
+            <div class="form-group">
+                <label for="create-weekly-goal">Meta semanal</label>
+                <input type="number" id="create-weekly-goal" name="weekly_goal" min="1" max="7" value="3" required>
+            </div>
+
+            <div class="modal-actions">
+                <button type="button" class="secondary-btn" data-close-modal>Cancelar</button>
+                <button type="submit" class="primary-btn">Crear hábito</button>
+            </div>
+        </form>
+    </div>
+
+    <div class="habit-modal hidden" id="editHabitModal">
+        <div class="modal-header">
+            <h3>Editar hábito</h3>
+            <button type="button" class="modal-close-btn" data-close-modal>&times;</button>
+        </div>
+
+        <form method="POST" id="editHabitForm" class="habit-form">
+            <div class="form-group">
+                <label for="edit-name">Nombre</label>
+                <input type="text" id="edit-name" name="name" required>
+            </div>
+
+            <div class="form-group">
+                <label for="edit-color">Color</label>
+                <input type="color" id="edit-color" name="color" value="#22c55e">
+            </div>
+
+            <div class="form-group">
+                <label for="edit-weekly-goal">Meta semanal</label>
+                <input type="number" id="edit-weekly-goal" name="weekly_goal" min="1" max="7" required>
+            </div>
+
+            <div class="modal-actions">
+                <button type="button" class="secondary-btn" data-close-modal>Cancelar</button>
+                <button type="submit" class="primary-btn">Guardar cambios</button>
+            </div>
+        </form>
+
+        <form method="POST" id="deleteHabitForm" class="delete-habit-form" onsubmit="return confirm('¿Seguro que querés eliminar este hábito?');">
+            <button type="submit" class="danger-btn">Eliminar hábito</button>
+        </form>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+    const habitLabels = {{ chart_labels | tojson }};
+    const habitCompleted = {{ chart_completed | tojson }};
+    const habitGoals = {{ chart_goals | tojson }};
+    const habitColors = {{ chart_colors | tojson }};
+
+    let habitsChartInstance = null;
+
+    function getChartThemeColors() {
+        const styles = getComputedStyle(document.body);
+        return {
+            text: styles.getPropertyValue('--chart-text').trim(),
+            grid: styles.getPropertyValue('--chart-grid').trim(),
+            goalBg: styles.getPropertyValue('--chart-goal-bg').trim(),
+            goalBorder: styles.getPropertyValue('--chart-goal-border').trim()
+        };
+    }
+
+    function renderHabitsChart() {
+        const ctx = document.getElementById("habitsChart");
+        if (!ctx || habitLabels.length === 0) return;
+
+        const theme = getChartThemeColors();
+
+        if (habitsChartInstance) {
+            habitsChartInstance.destroy();
+        }
+
+        habitsChartInstance = new Chart(ctx, {
+            type: "bar",
+            data: {
+                labels: habitLabels,
+                datasets: [
+                    {
+                        label: "Completado",
+                        data: habitCompleted,
+                        backgroundColor: habitColors,
+                        borderColor: habitColors,
+                        borderWidth: 1
+                    },
+                    {
+                        label: "Meta",
+                        data: habitGoals,
+                        backgroundColor: theme.goalBg,
+                        borderColor: theme.goalBorder,
+                        borderWidth: 1
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    x: {
+                        ticks: {
+                            color: theme.text
+                        },
+                        grid: {
+                            color: theme.grid
+                        }
+                    },
+                    y: {
+                        beginAtZero: true,
+                        suggestedMax: 7,
+                        ticks: {
+                            stepSize: 1,
+                            color: theme.text
+                        },
+                        grid: {
+                            color: theme.grid
+                        }
+                    }
+                },
+                plugins: {
+                    legend: {
+                        position: "top",
+                        labels: {
+                            color: theme.text
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    renderHabitsChart();
+    window.renderHabitsChart = renderHabitsChart;
+
+    const modalOverlay = document.getElementById("habitModalOverlay");
+    const createModal = document.getElementById("createHabitModal");
+    const editModal = document.getElementById("editHabitModal");
+    const openCreateModalBtn = document.getElementById("openCreateModal");
+    const emptyCreateBtn = document.getElementById("emptyCreateBtn");
+    const editForm = document.getElementById("editHabitForm");
+
+    function closeAllModals() {
+        modalOverlay.classList.add("hidden");
+        createModal.classList.add("hidden");
+        editModal.classList.add("hidden");
+    }
+
+    function openCreateModal() {
+        modalOverlay.classList.remove("hidden");
+        createModal.classList.remove("hidden");
+        editModal.classList.add("hidden");
+    }
+
+    function openEditModal(id, name, color, goal) {
+    editForm.action = `/habits/edit/${id}`;
+
+    const deleteForm = document.getElementById("deleteHabitForm");
+    if (deleteForm) {
+        deleteForm.action = `/habits/delete/${id}`;
+    }
+
+    document.getElementById("edit-name").value = name;
+    document.getElementById("edit-color").value = color;
+    document.getElementById("edit-weekly-goal").value = goal;
+
+    modalOverlay.classList.remove("hidden");
+    editModal.classList.remove("hidden");
+    createModal.classList.add("hidden");
+}
+    if (openCreateModalBtn) {
+        openCreateModalBtn.addEventListener("click", openCreateModal);
+    }
+
+    if (emptyCreateBtn) {
+        emptyCreateBtn.addEventListener("click", openCreateModal);
+    }
+
+    document.querySelectorAll("[data-close-modal]").forEach(btn => {
+        btn.addEventListener("click", closeAllModals);
+    });
+
+    modalOverlay.addEventListener("click", (e) => {
+        if (e.target === modalOverlay) {
+            closeAllModals();
+        }
+    });
+
+    document.querySelectorAll(".edit-habit-btn").forEach(btn => {
+        btn.addEventListener("click", () => {
+            openEditModal(
+                btn.dataset.id,
+                btn.dataset.name,
+                btn.dataset.color,
+                btn.dataset.goal
+            );
+        });
+    });
+
+    document.querySelectorAll(".js-day-btn").forEach(btn => {
+        btn.addEventListener("click", async () => {
+            const url = btn.dataset.url;
+            const color = btn.dataset.color;
+            const habitId = btn.dataset.habitId;
+            const chartIndex = Number(btn.dataset.chartIndex);
+            
+            try {
+                const response = await fetch(url, {
+                    method: "POST",
+                    headers: {
+                        "X-Requested-With": "XMLHttpRequest"
+                    }
+                });
+
+                if (!response.ok) return;
+
+                const data = await response.json();
+                if (!data.ok) return;
+
+                if (data.completed) {
+                    btn.classList.add("completed");
+                    btn.style.backgroundColor = color;
+                    btn.style.borderColor = color;
+                    btn.style.color = "white";
+                } else {
+                    btn.classList.remove("completed");
+                    btn.style.backgroundColor = "";
+                    btn.style.borderColor = "";
+                    btn.style.color = "";
+                }
+
+                const countEl = document.getElementById(`habit-count-${habitId}`);
+                if (countEl) {
+                    countEl.textContent = `${data.completed_count}/${data.weekly_goal} veces esta semana`;
+                }
+
+                const badgeEl = document.getElementById(`habit-badge-${habitId}`);
+                if (badgeEl) {
+                    badgeEl.textContent = data.completed_count;
+                }
+
+                const progressEl = document.getElementById(`habit-progress-${habitId}`);
+                if (progressEl) {
+                    progressEl.style.width = `${data.progress_percent}%`;
+                }
+
+                const streakEl = document.getElementById(`habit-streak-${habitId}`);
+                if (streakEl && data.streak !== undefined) {
+                    streakEl.textContent = `🔥 ${data.streak}`;
+                }
+
+                if (!Number.isNaN(chartIndex)) {
+                    habitCompleted[chartIndex] = data.completed_count;
+                    if (typeof renderHabitsChart === "function") {
+                        renderHabitsChart();
+                    }
+                }
+
+            } catch (error) {
+                console.error("Error al marcar hábito:", error);
+            }
+        });
+    });
+</script>
+{% endblock %}

@@ -1,0 +1,65 @@
+:root {
+    --bg: #f5e8d1;
+    --text: #0f1b26;
+    --text-soft: #5d5a52;
+    --header-bg: #f5e8d1;
+    --header-border: rgba(15, 27, 38, 0.14);
+    --card-bg: #fbf3e6;
+    --card-alt-bg: #fff8ee;
+    --border: rgba(15, 27, 38, 0.14);
+    --border-strong: rgba(15, 27, 38, 0.24);
+    --input-bg: #fff8ee;
+    --input-text: #0f1b26;
+    --track-bg: rgba(32, 165, 166, 0.16);
+    --day-bg: rgba(15, 27, 38, 0.06);
+    --overlay: rgba(15, 27, 38, 0.45);
+    --shadow: 0 4px 14px rgba(15, 27, 38, 0.10);
+
+    --primary: #20a5a6;
+    --primary-hover: #dd5639;
+
+    --secondary-bg: rgba(15, 27, 38, 0.08);
+    --secondary-hover: rgba(15, 27, 38, 0.14);
+    --secondary-text: #0f1b26;
+
+    --chart-text: #0f1b26;
+    --chart-grid: rgba(15, 27, 38, 0.12);
+    --chart-goal-bg: rgba(221, 86, 57, 0.22);
+    --chart-goal-border: rgba(221, 86, 57, 0.45);
+}
+
+html.dark-mode {
+    --bg: #1b1714;
+    --text: #f5e8d1;
+    --text-soft: rgba(245, 232, 209, 0.70);
+
+    --header-bg: #231d19;
+    --header-border: rgba(245, 232, 209, 0.10);
+
+    --card-bg: #2a221d;
+    --card-alt-bg: #241d18;
+
+    --border: rgba(245, 232, 209, 0.10);
+    --border-strong: rgba(245, 232, 209, 0.18);
+
+    --input-bg: #241d18;
+    --input-text: #f5e8d1;
+
+    --track-bg: rgba(32, 165, 166, 0.20);
+    --day-bg: #312822;
+
+    --overlay: rgba(0, 0, 0, 0.62);
+    --shadow: 0 8px 24px rgba(0, 0, 0, 0.32);
+
+    --primary: #20a5a6;
+    --primary-hover: #dd5639;
+
+    --secondary-bg: rgba(245, 232, 209, 0.08);
+    --secondary-hover: rgba(245, 232, 209, 0.14);
+    --secondary-text: #f5e8d1;
+
+    --chart-text: #f5e8d1;
+    --chart-grid: rgba(245, 232, 209, 0.12);
+    --chart-goal-bg: rgba(57, 112, 221, 0.2);
+    --chart-goal-border: rgba(57, 196, 221, 0.38);
+}

@@ -1,0 +1,367 @@
+{% extends "base.html" %}
+
+{% block title %}Inicio{% endblock %}
+
+{% block content %}
+<section class="home-dashboard fade-in-page">
+    <section class="home-hero-card">
+        <div class="home-hero-top">
+            <div>
+                <h2 id="dashboardTitle">{{ dashboard_config.title }}</h2>
+                <p id="dashboardDescription">{{ dashboard_config.description }}</p>
+            </div>
+
+            <button type="button" class="primary-btn" id="openHeaderEditModal">Editar</button>
+        </div>
+    </section>
+
+    <div class="home-main-grid">
+        <section class="home-tasks-card">
+            <div class="section-header home-section-header">
+                <h3>Tareas rápidas</h3>
+                <button type="button" class="icon-add-btn small-add-btn" id="openTaskCreateModal">+</button>
+            </div>
+
+            <p class="empty-state" id="homeTasksEmptyState" {% if home_tasks %}style="display: none;"{% endif %}>
+                Todavía no hay tareas rápidas.
+            </p>
+
+            <div class="home-task-list" id="homeTaskList">
+                {% for task in home_tasks %}
+                    <div class="home-task-item {% if task.completed %}completed{% endif %}" id="home-task-{{ task.id }}">
+                        <form method="POST" action="{{ url_for('dashboard.toggle_home_task', task_id=task.id) }}" class="js-home-task-toggle">
+                            <button type="submit" class="home-task-check">
+                                {% if task.completed %}✓{% endif %}
+                            </button>
+                        </form>
+
+                        <span class="home-task-title">{{ task.title }}</span>
+
+                        <form method="POST" action="{{ url_for('dashboard.delete_home_task', task_id=task.id) }}" class="js-home-task-delete">
+                            <button type="submit" class="home-task-delete">×</button>
+                        </form>
+                    </div>
+                {% endfor %}
+            </div>
+        </section>
+
+        <section class="home-note-card">
+            <div class="section-header home-section-header">
+                <h3 id="homeNoteTitle">{{ home_note.title }}</h3>
+                <button type="button" class="primary-btn" id="openNoteEditModal">Editar nota</button>
+            </div>
+
+            <div class="home-note-content" id="homeNoteContent">
+                {% if home_note.content %}
+                    {{ home_note.content }}
+                {% else %}
+                    <span class="empty-state">Todavía no escribiste una nota principal.</span>
+                {% endif %}
+            </div>
+        </section>
+    </div>
+</section>
+
+<!-- Modal editar header -->
+<div class="modal-overlay hidden" id="headerEditModalOverlay">
+    <div class="habit-modal hidden" id="headerEditModal">
+        <div class="modal-header">
+            <h3>Editar encabezado</h3>
+            <button type="button" class="modal-close-btn" data-close-header-modal>&times;</button>
+        </div>
+
+        <form method="POST" action="{{ url_for('dashboard.edit_dashboard_header') }}" class="habit-form">
+            <div class="form-group">
+                <label for="dashboard-title">Título</label>
+                <input type="text" id="dashboard-title" name="title" value="{{ dashboard_config.title }}" required>
+            </div>
+
+            <div class="form-group">
+                <label for="dashboard-description">Descripción</label>
+                <textarea id="dashboard-description" name="description" rows="4">{{ dashboard_config.description }}</textarea>
+            </div>
+
+            <div class="modal-actions">
+                <button type="button" class="secondary-btn" data-close-header-modal>Cancelar</button>
+                <button type="submit" class="primary-btn">Guardar</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Modal crear tarea -->
+<div class="modal-overlay hidden" id="taskCreateModalOverlay">
+    <div class="habit-modal hidden" id="taskCreateModal">
+        <div class="modal-header">
+            <h3>Nueva tarea rápida</h3>
+            <button type="button" class="modal-close-btn" data-close-task-modal>&times;</button>
+        </div>
+
+        <form method="POST" action="{{ url_for('dashboard.create_home_task') }}" class="habit-form">
+            <div class="form-group">
+                <label for="home-task-title">Título</label>
+                <input type="text" id="home-task-title" name="title" placeholder="Ej: Revisar proyecto X" required>
+            </div>
+
+            <div class="modal-actions">
+                <button type="button" class="secondary-btn" data-close-task-modal>Cancelar</button>
+                <button type="submit" class="primary-btn">Agregar tarea</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Modal editar nota -->
+<div class="modal-overlay hidden" id="noteEditModalOverlay">
+    <div class="habit-modal hidden" id="noteEditModal">
+        <div class="modal-header">
+            <h3>Editar nota principal</h3>
+            <button type="button" class="modal-close-btn" data-close-note-modal>&times;</button>
+        </div>
+
+        <form method="POST" action="{{ url_for('dashboard.edit_home_note') }}" class="habit-form">
+            <div class="form-group">
+                <label for="home-note-title">Título</label>
+                <input type="text" id="home-note-title" name="title" value="{{ home_note.title }}">
+            </div>
+
+            <div class="form-group">
+                <label for="home-note-content">Contenido</label>
+                <textarea id="home-note-content" name="content" rows="10">{{ home_note.content }}</textarea>
+            </div>
+
+            <div class="modal-actions">
+                <button type="button" class="secondary-btn" data-close-note-modal>Cancelar</button>
+                <button type="submit" class="primary-btn">Guardar nota</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+    const headerOverlay = document.getElementById("headerEditModalOverlay");
+    const headerModal = document.getElementById("headerEditModal");
+    const openHeaderBtn = document.getElementById("openHeaderEditModal");
+
+    const taskOverlay = document.getElementById("taskCreateModalOverlay");
+    const taskModal = document.getElementById("taskCreateModal");
+    const openTaskBtn = document.getElementById("openTaskCreateModal");
+
+    const noteOverlay = document.getElementById("noteEditModalOverlay");
+    const noteModal = document.getElementById("noteEditModal");
+    const openNoteBtn = document.getElementById("openNoteEditModal");
+
+    function closeHeaderModal() {
+        headerOverlay.classList.add("hidden");
+        headerModal.classList.add("hidden");
+    }
+
+    function openHeaderModal() {
+        headerOverlay.classList.remove("hidden");
+        headerModal.classList.remove("hidden");
+    }
+
+    function closeTaskModal() {
+        taskOverlay.classList.add("hidden");
+        taskModal.classList.add("hidden");
+    }
+
+    function openTaskModal() {
+        taskOverlay.classList.remove("hidden");
+        taskModal.classList.remove("hidden");
+    }
+
+    function closeNoteModal() {
+        noteOverlay.classList.add("hidden");
+        noteModal.classList.add("hidden");
+    }
+
+    function openNoteModal() {
+        noteOverlay.classList.remove("hidden");
+        noteModal.classList.remove("hidden");
+    }
+
+    if (openHeaderBtn) openHeaderBtn.addEventListener("click", openHeaderModal);
+    if (openTaskBtn) openTaskBtn.addEventListener("click", openTaskModal);
+    if (openNoteBtn) openNoteBtn.addEventListener("click", openNoteModal);
+
+    document.querySelectorAll("[data-close-header-modal]").forEach(btn => {
+        btn.addEventListener("click", closeHeaderModal);
+    });
+
+    document.querySelectorAll("[data-close-task-modal]").forEach(btn => {
+        btn.addEventListener("click", closeTaskModal);
+    });
+
+    document.querySelectorAll("[data-close-note-modal]").forEach(btn => {
+        btn.addEventListener("click", closeNoteModal);
+    });
+
+    headerOverlay.addEventListener("click", (e) => {
+        if (e.target === headerOverlay) closeHeaderModal();
+    });
+
+    taskOverlay.addEventListener("click", (e) => {
+        if (e.target === taskOverlay) closeTaskModal();
+    });
+
+    noteOverlay.addEventListener("click", (e) => {
+        if (e.target === noteOverlay) closeNoteModal();
+    });
+
+    function escapeHtml(text) {
+        const div = document.createElement("div");
+        div.textContent = text || "";
+        return div.innerHTML;
+    }
+
+    function updateEmptyStateVisibility() {
+        const taskList = document.getElementById("homeTaskList");
+        const emptyState = document.getElementById("homeTasksEmptyState");
+        if (!taskList || !emptyState) return;
+
+        const hasTasks = taskList.querySelectorAll(".home-task-item").length > 0;
+        emptyState.style.display = hasTasks ? "none" : "";
+    }
+
+    function bindHomeTaskActions(taskElement, task) {
+        const toggleForm = taskElement.querySelector(".js-home-task-toggle");
+        const deleteForm = taskElement.querySelector(".js-home-task-delete");
+
+        if (toggleForm) {
+            toggleForm.addEventListener("submit", async (e) => {
+                e.preventDefault();
+
+                const response = await fetch(toggleForm.action, {
+                    method: "POST",
+                    headers: { "X-Requested-With": "XMLHttpRequest" }
+                });
+
+                const data = await response.json();
+                if (!data.ok) return;
+
+                if (data.task.completed) {
+                    taskElement.classList.add("completed");
+                    taskElement.querySelector(".home-task-check").textContent = "✓";
+                } else {
+                    taskElement.classList.remove("completed");
+                    taskElement.querySelector(".home-task-check").textContent = "";
+                }
+            });
+        }
+
+        if (deleteForm) {
+            deleteForm.addEventListener("submit", async (e) => {
+                e.preventDefault();
+
+                const response = await fetch(deleteForm.action, {
+                    method: "POST",
+                    headers: { "X-Requested-With": "XMLHttpRequest" }
+                });
+
+                const data = await response.json();
+                if (!data.ok) return;
+
+                taskElement.remove();
+                updateEmptyStateVisibility();
+            });
+        }
+    }
+
+    function buildHomeTask(task) {
+        const wrapper = document.createElement("div");
+        wrapper.className = `home-task-item${task.completed ? " completed" : ""}`;
+        wrapper.id = `home-task-${task.id}`;
+
+        wrapper.innerHTML = `
+            <form method="POST" action="/dashboard/tasks/${task.id}/toggle" class="js-home-task-toggle">
+                <button type="submit" class="home-task-check">${task.completed ? "✓" : ""}</button>
+            </form>
+
+            <span class="home-task-title">${escapeHtml(task.title)}</span>
+
+            <form method="POST" action="/dashboard/tasks/${task.id}/delete" class="js-home-task-delete">
+                <button type="submit" class="home-task-delete">×</button>
+            </form>
+        `;
+
+        bindHomeTaskActions(wrapper, task);
+        return wrapper;
+    }
+
+    document.querySelectorAll(".home-task-item").forEach(taskEl => {
+        bindHomeTaskActions(taskEl, {});
+    });
+
+    const headerForm = headerModal ? headerModal.querySelector("form") : null;
+    const taskCreateForm = taskModal ? taskModal.querySelector("form") : null;
+    const noteForm = noteModal ? noteModal.querySelector("form") : null;
+
+    if (headerForm) {
+        headerForm.addEventListener("submit", async (e) => {
+            e.preventDefault();
+
+            const formData = new FormData(headerForm);
+            const response = await fetch(headerForm.action, {
+                method: "POST",
+                headers: { "X-Requested-With": "XMLHttpRequest" },
+                body: formData
+            });
+
+            const data = await response.json();
+            if (!data.ok) return;
+
+            document.getElementById("dashboardTitle").textContent = data.config.title;
+            document.getElementById("dashboardDescription").textContent = data.config.description;
+            closeHeaderModal();
+        });
+    }
+
+    if (taskCreateForm) {
+        taskCreateForm.addEventListener("submit", async (e) => {
+            e.preventDefault();
+
+            const formData = new FormData(taskCreateForm);
+            const response = await fetch(taskCreateForm.action, {
+                method: "POST",
+                headers: { "X-Requested-With": "XMLHttpRequest" },
+                body: formData
+            });
+
+            const data = await response.json();
+            if (!data.ok) return;
+
+            const taskList = document.getElementById("homeTaskList");
+            if (taskList) {
+                taskList.appendChild(buildHomeTask(data.task));
+            }
+
+            taskCreateForm.reset();
+            updateEmptyStateVisibility();
+            closeTaskModal();
+        });
+    }
+
+    if (noteForm) {
+        noteForm.addEventListener("submit", async (e) => {
+            e.preventDefault();
+
+            const formData = new FormData(noteForm);
+            const response = await fetch(noteForm.action, {
+                method: "POST",
+                headers: { "X-Requested-With": "XMLHttpRequest" },
+                body: formData
+            });
+
+            const data = await response.json();
+            if (!data.ok) return;
+
+            document.getElementById("homeNoteTitle").textContent = data.note.title;
+            document.getElementById("homeNoteContent").textContent = data.note.content;
+            closeNoteModal();
+        });
+    }
+
+    updateEmptyStateVisibility();
+</script>
+{% endblock %}
