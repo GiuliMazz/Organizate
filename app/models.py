@@ -11,6 +11,7 @@ class Habit(db.Model):
     weekly_goal = db.Column(db.Integer, nullable=False, default=3)
     is_active = db.Column(db.Boolean, default=True, nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    position = db.Column(db.Integer, nullable=False, default=0)
 
     checks = db.relationship(
         "HabitCheck",

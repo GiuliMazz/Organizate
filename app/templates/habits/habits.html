@@ -1,6 +1,14 @@
 {% extends "base.html" %}
 {% block extra_css %}
 <link rel="stylesheet" href="{{ url_for('static', filename='css/habits.css') }}">
+<style>
+    /* Estilo opcional para cuando estás arrastrando una tarjeta */
+    .habit-card-ghost {
+        opacity: 0.4;
+        background-color: var(--bg-secondary, #f3f4f6);
+        border: 2px dashed #9ca3af;
+    }
+</style>
 {% endblock %}
 {% block title %}Hábitos - Rastreador{% endblock %}
 
@@ -22,10 +30,10 @@
             </div>
 
             {% if habits_data %}
-                <div class="habit-cards">
+                <div class="habit-cards" id="lista-habitos">
                     {% for item in habits_data %}
                         {% set habit_index = loop.index0 %}
-                        <article class="habit-card">
+                        <article class="habit-card" data-id="{{ item.habit.id }}">
                             <div class="habit-card-top">
                                 <div>
                                     <h4>
@@ -180,6 +188,8 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
+
 <script>
     const habitLabels = {{ chart_labels | tojson }};
     const habitCompleted = {{ chart_completed | tojson }};
@@ -288,21 +298,22 @@
     }
 
     function openEditModal(id, name, color, goal) {
-    editForm.action = `/habits/edit/${id}`;
+        editForm.action = `/habits/edit/${id}`;
 
-    const deleteForm = document.getElementById("deleteHabitForm");
-    if (deleteForm) {
-        deleteForm.action = `/habits/delete/${id}`;
+        const deleteForm = document.getElementById("deleteHabitForm");
+        if (deleteForm) {
+            deleteForm.action = `/habits/delete/${id}`;
+        }
+
+        document.getElementById("edit-name").value = name;
+        document.getElementById("edit-color").value = color;
+        document.getElementById("edit-weekly-goal").value = goal;
+
+        modalOverlay.classList.remove("hidden");
+        editModal.classList.remove("hidden");
+        createModal.classList.add("hidden");
     }
-
-    document.getElementById("edit-name").value = name;
-    document.getElementById("edit-color").value = color;
-    document.getElementById("edit-weekly-goal").value = goal;
-
-    modalOverlay.classList.remove("hidden");
-    editModal.classList.remove("hidden");
-    createModal.classList.add("hidden");
-}
+    
     if (openCreateModalBtn) {
         openCreateModalBtn.addEventListener("click", openCreateModal);
     }
@@ -395,6 +406,50 @@
                 console.error("Error al marcar hábito:", error);
             }
         });
+    });
+
+    // --- NUEVO CÓDIGO DE DRAG AND DROP ---
+    document.addEventListener('DOMContentLoaded', function() {
+        const listaHabitos = document.getElementById('lista-habitos');
+        
+        if (listaHabitos) {
+            Sortable.create(listaHabitos, {
+                animation: 150,
+                ghostClass: 'habit-card-ghost', // Le da un estilo transparente cuando arrastrás
+                onEnd: function (evt) {
+                    let nuevoOrden = [];
+                    // Seleccionamos todas las tarjetas (ahora tienen data-id)
+                    let items = listaHabitos.querySelectorAll('article.habit-card');
+                    
+                    items.forEach((item, index) => {
+                        nuevoOrden.push({
+                            id: item.getAttribute('data-id'),
+                            position: index
+                        });
+                    });
+
+                    // Mandamos el orden nuevo a tu backend
+                    fetch('/habits/reorder', { // O '/habits/reorder' dependiendo cómo configuraste tus rutas
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify(nuevoOrden)
+                    })
+                    .then(response => {
+                        if(response.ok) {
+                            console.log('Orden guardado en la Base de Datos');
+                            // Refrescamos la página suavemente para que el gráfico 
+                            // se actualice con el orden nuevo.
+                            window.location.reload();
+                        }
+                    })
+                    .catch((error) => {
+                        console.error('Error al guardar el orden:', error);
+                    });
+                }
+            });
+        }
     });
 </script>
 {% endblock %}

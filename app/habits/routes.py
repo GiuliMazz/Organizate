@@ -71,13 +71,16 @@ def habits_page():
         return redirect(url_for("habits.habits_page"))
 
     week_dates = get_week_dates()
-    habits = Habit.query.order_by(Habit.created_at.desc()).all()
+    habits = Habit.query.order_by(Habit.position).all()
 
     # --- LÓGICA DEL MAPA DE CALOR GLOBAL ---
     heatmap_days_count = 90
     today = date.today()
     heatmap_start = today - timedelta(days=heatmap_days_count - 1)
-    heatmap_dates = [heatmap_start + timedelta(days=i) for i in range(heatmap_days_count)]
+    
+    # Orden invertido: desde hoy hacia el pasado
+    heatmap_dates = [today - timedelta(days=i) for i in range(heatmap_days_count)]
+
     
     recent_checks = HabitCheck.query.filter(
         HabitCheck.date >= heatmap_start, 
@@ -242,3 +245,17 @@ def delete_habit(habit_id):
     db.session.delete(habit)
     db.session.commit()
     return redirect(url_for("habits.habits_page"))
+
+
+@habits_bp.route('/reorder', methods=['POST'])
+def reorder_habits():
+    data = request.get_json()
+    
+    # Recorremos la lista que nos manda el Javascript y actualizamos la base de datos
+    for item in data:
+        habit = Habit.query.get(item['id'])
+        if habit:
+            habit.position = item['position']
+    
+    db.session.commit()
+    return jsonify({'status': 'success'})
